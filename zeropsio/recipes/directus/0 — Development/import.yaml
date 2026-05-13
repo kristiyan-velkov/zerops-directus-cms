@@ -50,7 +50,7 @@ services:
   # source code or import YAML in plaintext.
   - hostname: directus
     type: nodejs@22
-    buildFromGit: https://github.com/kristiyan-velkov/directus-app
+    buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
     enableSubdomainAccess: true
     minContainers: 1
     maxContainers: 1
