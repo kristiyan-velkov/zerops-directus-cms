@@ -52,7 +52,7 @@ services:
   #   EMAIL_SMTP_USER (secret), EMAIL_SMTP_PASSWORD (secret)
   - hostname: directus
     type: nodejs@22
-    buildFromGit: https://github.com/zerops-recipe-apps/directus-app
+    buildFromGit: https://github.com/kristiyan-velkov/directus-app
     enableSubdomainAccess: true
     minContainers: 2
     maxContainers: 6

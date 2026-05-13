@@ -36,10 +36,10 @@ zerops:
           # Directus exposes a structured health endpoint that reports the
           # status of the app, database connection, and storage provider.
           path: /server/health
-        # Allow up to 3 minutes on the very first deploy:
-        # initCommands run bootstrap (system schema + admin user) then
-        # 'database migrate:latest' (custom schema + seed data) before
-        # the HTTP server accepts any traffic.
+        # Allow up to 3 minutes for the server to pass the readiness check.
+        # Note: initCommands (bootstrap → schema apply → seed-runner.sh) run
+        # BEFORE 'start', so this timeout only covers the actual server startup
+        # time — which is fast once all migrations and seeding are complete.
         failureTimeout: 180
         retryPeriod: 5
 
@@ -48,10 +48,10 @@ zerops:
 
       envVariables:
         # ── Directus Core ────────────────────────────────────────────────────
-        # Path where Directus discovers custom migrations, hooks, and endpoints.
+        # Path where Directus discovers the extensions directory.
         # Must match the directory deployed via deployFiles above.
-        # Custom migrations in ./extensions/migrations/ are applied by the
-        # 'database migrate:latest' initCommand (the second step after bootstrap).
+        # Contains snapshot.yaml (schema) and seed.js (demo data) — both applied
+        # automatically during initCommands via 'schema apply' and seed-runner.sh.
         EXTENSIONS_PATH: ./extensions
 
         # Directus is licensed under BSL 1.1. Setting ACCEPT_TERMS=true
