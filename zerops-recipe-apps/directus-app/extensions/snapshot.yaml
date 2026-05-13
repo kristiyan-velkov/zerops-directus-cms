@@ -1,0 +1,1116 @@
+# Directus schema snapshot — generated from local dev stack
+# Apply with:  directus schema apply --yes ./extensions/snapshot.yaml
+# Re-export:   directus schema snapshot ./extensions/snapshot.yaml
+#
+# Collections: categories · authors · posts
+# Relations:   posts.category_id → categories.id
+#              posts.author_id   → authors.id
+#              posts.cover_image → directus_files.id
+#              authors.avatar    → directus_files.id
+
+version: 1
+
+collections:
+  - collection: categories
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      collapse: open
+      color: null
+      display: null
+      display_options: null
+      group: null
+      hidden: false
+      icon: label
+      item_duplication_fields: null
+      note: null
+      preview_url: null
+      singleton: false
+      sort: 1
+      sort_field: sort
+      translations: null
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: categories
+
+  - collection: authors
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      collapse: open
+      color: null
+      display: null
+      display_options: null
+      group: null
+      hidden: false
+      icon: person
+      item_duplication_fields: null
+      note: null
+      preview_url: null
+      singleton: false
+      sort: 2
+      sort_field: sort
+      translations: null
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: authors
+
+  - collection: posts
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: status
+      archive_value: archived
+      collapse: open
+      color: null
+      display: null
+      display_options: null
+      group: null
+      hidden: false
+      icon: article
+      item_duplication_fields: null
+      note: null
+      preview_url: null
+      singleton: false
+      sort: 3
+      sort_field: null
+      translations: null
+      unarchive_value: draft
+      versioning: false
+    schema:
+      name: posts
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fields
+# ─────────────────────────────────────────────────────────────────────────────
+fields:
+  # ── categories ──────────────────────────────────────────────────────────────
+  - collection: categories
+    field: id
+    type: uuid
+    meta:
+      collection: categories
+      field: id
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: categories
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: categories
+    field: name
+    type: string
+    meta:
+      collection: categories
+      field: name
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      sort: 2
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: name
+      table: categories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: categories
+    field: slug
+    type: string
+    meta:
+      collection: categories
+      field: slug
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      sort: 3
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: slug
+      table: categories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: categories
+    field: sort
+    type: integer
+    meta:
+      collection: categories
+      field: sort
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 4
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: sort
+      table: categories
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  # ── authors ──────────────────────────────────────────────────────────────────
+  - collection: authors
+    field: id
+    type: uuid
+    meta:
+      collection: authors
+      field: id
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: authors
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: authors
+    field: name
+    type: string
+    meta:
+      collection: authors
+      field: name
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      sort: 2
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: name
+      table: authors
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: authors
+    field: email
+    type: string
+    meta:
+      collection: authors
+      field: email
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      sort: 3
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: email
+      table: authors
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: authors
+    field: bio
+    type: text
+    meta:
+      collection: authors
+      field: bio
+      conditions: null
+      display: null
+      display_options: null
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 4
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: bio
+      table: authors
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: authors
+    field: avatar
+    type: uuid
+    meta:
+      collection: authors
+      field: avatar
+      conditions: null
+      display: image
+      display_options: null
+      group: null
+      hidden: false
+      interface: file-image
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 5
+      special:
+        - file
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: avatar
+      table: authors
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: id
+      foreign_key_table: directus_files
+
+  - collection: authors
+    field: sort
+    type: integer
+    meta:
+      collection: authors
+      field: sort
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 6
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: sort
+      table: authors
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  # ── posts ────────────────────────────────────────────────────────────────────
+  - collection: posts
+    field: id
+    type: uuid
+    meta:
+      collection: posts
+      field: id
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: posts
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: status
+    type: string
+    meta:
+      collection: posts
+      field: status
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - background: "var(--theme--primary)"
+            foreground: "#FFFFFF"
+            value: published
+          - background: "#D3DAE4"
+            foreground: "#18222F"
+            value: draft
+          - background: "var(--theme--warning)"
+            foreground: "#FFFFFF"
+            value: archived
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: Published
+            value: published
+          - text: Draft
+            value: draft
+          - text: Archived
+            value: archived
+      readonly: false
+      required: true
+      sort: 2
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: status
+      table: posts
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: title
+    type: string
+    meta:
+      collection: posts
+      field: title
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      sort: 3
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: title
+      table: posts
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: slug
+    type: string
+    meta:
+      collection: posts
+      field: slug
+      conditions: null
+      display: raw
+      display_options: null
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      sort: 4
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: slug
+      table: posts
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: excerpt
+    type: text
+    meta:
+      collection: posts
+      field: excerpt
+      conditions: null
+      display: null
+      display_options: null
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 5
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: excerpt
+      table: posts
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: content
+    type: text
+    meta:
+      collection: posts
+      field: content
+      conditions: null
+      display: null
+      display_options: null
+      group: null
+      hidden: false
+      interface: input-rich-text-md
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 6
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content
+      table: posts
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: cover_image
+    type: uuid
+    meta:
+      collection: posts
+      field: cover_image
+      conditions: null
+      display: image
+      display_options: null
+      group: null
+      hidden: false
+      interface: file-image
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 7
+      special:
+        - file
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: cover_image
+      table: posts
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: id
+      foreign_key_table: directus_files
+
+  - collection: posts
+    field: category_id
+    type: uuid
+    meta:
+      collection: posts
+      field: category_id
+      conditions: null
+      display: related-values
+      display_options:
+        template: "{{name}}"
+      group: null
+      hidden: false
+      interface: select-dropdown-m2o
+      note: null
+      options:
+        template: "{{name}}"
+      readonly: false
+      required: false
+      sort: 8
+      special:
+        - m2o
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: category_id
+      table: posts
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: id
+      foreign_key_table: categories
+
+  - collection: posts
+    field: author_id
+    type: uuid
+    meta:
+      collection: posts
+      field: author_id
+      conditions: null
+      display: related-values
+      display_options:
+        template: "{{name}}"
+      group: null
+      hidden: false
+      interface: select-dropdown-m2o
+      note: null
+      options:
+        template: "{{name}}"
+      readonly: false
+      required: false
+      sort: 9
+      special:
+        - m2o
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: author_id
+      table: posts
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: id
+      foreign_key_table: authors
+
+  - collection: posts
+    field: tags
+    type: json
+    meta:
+      collection: posts
+      field: tags
+      conditions: null
+      display: labels
+      display_options: null
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 10
+      special:
+        - cast-json
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: tags
+      table: posts
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: date_created
+    type: timestamp
+    meta:
+      collection: posts
+      field: date_created
+      conditions: null
+      display: datetime
+      display_options:
+        relative: true
+      group: null
+      hidden: true
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      sort: 11
+      special:
+        - date-created
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: posts
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: posts
+      field: date_updated
+      conditions: null
+      display: datetime
+      display_options:
+        relative: true
+      group: null
+      hidden: true
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      sort: 12
+      special:
+        - date-updated
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: posts
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+  - collection: posts
+    field: date_published
+    type: timestamp
+    meta:
+      collection: posts
+      field: date_published
+      conditions: null
+      display: datetime
+      display_options: null
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 13
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_published
+      table: posts
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_column: null
+      foreign_key_table: null
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Relations
+# ─────────────────────────────────────────────────────────────────────────────
+relations:
+  - collection: posts
+    field: category_id
+    related_collection: categories
+    meta:
+      junction_field: null
+      many_collection: posts
+      many_field: category_id
+      one_allowed_collections: null
+      one_collection: categories
+      one_collection_field: null
+      one_deselect_action: nullify
+      one_field: null
+      sort_field: null
+    schema:
+      column: category_id
+      constraint_name: posts_category_id_foreign
+      foreign_key_column: id
+      foreign_key_table: categories
+      on_delete: SET NULL
+      on_update: NO ACTION
+      table: posts
+
+  - collection: posts
+    field: author_id
+    related_collection: authors
+    meta:
+      junction_field: null
+      many_collection: posts
+      many_field: author_id
+      one_allowed_collections: null
+      one_collection: authors
+      one_collection_field: null
+      one_deselect_action: nullify
+      one_field: null
+      sort_field: null
+    schema:
+      column: author_id
+      constraint_name: posts_author_id_foreign
+      foreign_key_column: id
+      foreign_key_table: authors
+      on_delete: SET NULL
+      on_update: NO ACTION
+      table: posts
+
+  - collection: authors
+    field: avatar
+    related_collection: directus_files
+    meta:
+      junction_field: null
+      many_collection: authors
+      many_field: avatar
+      one_allowed_collections: null
+      one_collection: directus_files
+      one_collection_field: null
+      one_deselect_action: nullify
+      one_field: null
+      sort_field: null
+    schema:
+      column: avatar
+      constraint_name: authors_avatar_foreign
+      foreign_key_column: id
+      foreign_key_table: directus_files
+      on_delete: SET NULL
+      on_update: NO ACTION
+      table: authors
+
+  - collection: posts
+    field: cover_image
+    related_collection: directus_files
+    meta:
+      junction_field: null
+      many_collection: posts
+      many_field: cover_image
+      one_allowed_collections: null
+      one_collection: directus_files
+      one_collection_field: null
+      one_deselect_action: nullify
+      one_field: null
+      sort_field: null
+    schema:
+      column: cover_image
+      constraint_name: posts_cover_image_foreign
+      foreign_key_column: id
+      foreign_key_table: directus_files
+      on_delete: SET NULL
+      on_update: NO ACTION
+      table: posts

@@ -1,0 +1,73 @@
+# zeropsPreprocessor=on
+project:
+  name: directus-development
+
+services:
+  # ── 1. PostgreSQL database ────────────────────────────────────────────────
+  # Deployed first (priority 10) so the database is accepting connections
+  # before the Directus container starts its initCommands.
+  # NON_HA is sufficient for development; use HA in production.
+  - hostname: db
+    type: postgresql@16
+    mode: NON_HA
+    priority: 10
+
+  # ── 2. Valkey cache / pub-sub ─────────────────────────────────────────────
+  # Valkey is a Redis-compatible key-value store.
+  # Required even in development because zerops.yaml sets
+  # SYNCHRONIZATION_STORE=redis unconditionally. Directus uses it to
+  # broadcast schema cache invalidations across containers.
+  - hostname: cache
+    type: valkey@7.2
+    mode: NON_HA
+    priority: 9
+
+  # ── 3. S3-compatible object storage ──────────────────────────────────────
+  # Stores all Directus file uploads. 'public-read' makes uploaded assets
+  # accessible without authentication — required for serving images in the
+  # Data Studio and via the /assets endpoint.
+  - hostname: storage
+    type: object-storage
+    priority: 8
+    objectStorageSize: 10
+    objectStoragePolicy: public-read
+
+  # ── 4. Mailpit SMTP sink ──────────────────────────────────────────────────
+  # Mailpit is a lightweight SMTP sink that captures all outbound email.
+  # Directus will send password-reset emails, magic-link invitations, etc.
+  # to Mailpit instead of a real mail server — safe for development.
+  # Open the Mailpit web UI (port 8025) via the service subdomain to inspect
+  # captured messages.
+  - hostname: mail
+    type: alpine@3.21
+    buildFromGit: https://github.com/zerops-recipe-apps/mailpit-app
+    enableSubdomainAccess: true
+
+  # ── 5. Directus application ───────────────────────────────────────────────
+  # Single container (minContainers=1, maxContainers=1) for development.
+  # The randomly generated secrets below are stored as Zerops env secrets
+  # and are only ever visible in the Zerops GUI — they are never stored in
+  # source code or import YAML in plaintext.
+  - hostname: directus
+    type: nodejs@22
+    buildFromGit: https://github.com/zerops-recipe-apps/directus-app
+    enableSubdomainAccess: true
+    minContainers: 1
+    maxContainers: 1
+    # Minimal vertical scaling for development.
+    verticalAutoscaling:
+      minRam: 1
+      maxRam: 4
+    envSecrets:
+      # SECRET signs every JWT issued by Directus (access tokens, refresh
+      # tokens, password-reset tokens). Must be a long random string.
+      # Rotating this value invalidates all existing sessions.
+      SECRET: <@generateRandomString(<64>)>
+
+      # Admin account credentials seeded by 'directus bootstrap' on first run.
+      # Retrieve these from the service's Secret Variables panel after deploy.
+      ADMIN_PASSWORD: <@generateRandomString(<20>)>
+
+      # Static API token for CI/CD pipelines and automation scripts.
+      # Use this instead of a password-based login for programmatic access.
+      ADMIN_TOKEN: <@generateRandomString(<40>)>

@@ -1,0 +1,156 @@
+# Local development environment for Directus on Zerops
+# Mirrors the production Zerops stack as closely as possible:
+#
+#   SERVICE    LOCAL IMAGE                         ZEROPS EQUIVALENT
+#   ──────────────────────────────────────────────────────────────────────────
+#   db       → postgres:16-alpine                  postgresql@16
+#   cache    → valkey/valkey:7.2.13-alpine         valkey@7.2        ← exact same version
+#   storage  → minio/minio:RELEASE.2025-09-07T16-13-09Z  object-storage  ← same S3-compatible API
+#   mail     → axllent/mailpit:v1.29.7              mailpit-app (alpine@3.21 + mailpit binary)
+#   directus → directus/directus:11.17.4           nodejs@22 + npm directus@^11
+#
+# MinIO vs Zerops object-storage:
+#   Both expose the same S3-compatible REST API (AWS S3 SDK compatible).
+#   All env vars (STORAGE_S3_ENDPOINT, KEY, SECRET, BUCKET, FORCE_PATH_STYLE)
+#   are identical — only the endpoint URL changes (localhost:9000 vs Zerops URL).
+#
+# Quick start:
+#   cp .env.example .env
+#   docker compose up -d
+#   open http://localhost:8055   # Directus Data Studio
+#   open http://localhost:8025   # Mailpit web UI
+#   open http://localhost:9001   # MinIO Console (minioadmin / minioadmin123)
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-directus}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-directus_secret}
+      POSTGRES_DB: ${DB_DATABASE:-directus}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-directus} -d ${DB_DATABASE:-directus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Valkey 7.2 cache ──────────────────────────────────────────────────────
+  # Exact same major.minor as Zerops valkey@7.2 — ensures identical behaviour
+  # for SYNCHRONIZATION_STORE, pub/sub, and key expiry semantics.
+  cache:
+    image: valkey/valkey:7.2.13-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO S3-compatible object storage ────────────────────────────────────
+  storage:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_S3_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_S3_SECRET:-minioadmin123}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO Console UI
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── MinIO bucket initialiser ───────────────────────────────────────────────
+  # Runs once to create the bucket and set it to public-read.
+  # This mirrors the Zerops object-storage 'objectStoragePolicy: public-read' setting.
+  createbuckets:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      storage:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://storage:9000 ${STORAGE_S3_KEY:-minioadmin} ${STORAGE_S3_SECRET:-minioadmin123};
+      /usr/bin/mc mb local/${STORAGE_S3_BUCKET:-directus-local} --ignore-existing;
+      /usr/bin/mc anonymous set public local/${STORAGE_S3_BUCKET:-directus-local};
+      echo 'Bucket ${STORAGE_S3_BUCKET:-directus-local} is ready (public-read).';
+      exit 0;
+      "
+
+  # ── Mailpit SMTP sink ─────────────────────────────────────────────────────
+  # Captures all outbound email. Open http://localhost:8025 to inspect messages.
+  mail:
+    image: axllent/mailpit:v1.29.7
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
+
+  # ── Directus 11.17.4 ──────────────────────────────────────────────────────
+  # Pinned to the exact latest stable release — matches the directus@^11 in
+  # package.json. Update both here and in package.json together when upgrading.
+  #
+  # Startup sequence (command below):
+  #   1. bootstrap    — system tables + admin user (idempotent)
+  #   2. schema apply — custom collections via native Directus diff engine (idempotent)
+  #   3. start (bg)   — server starts in background so the SDK can reach it
+  #   4. health poll  — waits until /server/health returns "ok"
+  #   5. seed.js      — inserts demo data via @directus/sdk + ADMIN_TOKEN
+  #   6. wait         — keeps container alive with the foreground server process
+  directus:
+    image: directus/directus:11.17.4
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+      mail:
+        condition: service_started
+    ports:
+      - "8055:8055"
+    volumes:
+      # Mount local extensions/ — contains snapshot.yaml and seed.js.
+      # In production (Zerops), extensions/ is deployed as part of the build artifact.
+      - ./extensions:/directus/extensions
+    env_file:
+      - .env
+    command: >
+      sh -c "
+        node cli.js bootstrap &&
+        node cli.js schema apply --yes /directus/extensions/snapshot.yaml &&
+        node cli.js start &
+        node -e \"
+          (async () => {
+            const deadline = Date.now() + 120000;
+            while (Date.now() < deadline) {
+              try {
+                const r = await fetch('http://localhost:8055/server/health');
+                const d = await r.json();
+                if (d.status === 'ok') process.exit(0);
+              } catch (_) {}
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            process.exit(1);
+          })();
+        \" &&
+        DIRECTUS_URL=http://localhost:8055 DIRECTUS_TOKEN=$$ADMIN_TOKEN node /directus/extensions/seed.js &&
+        wait
+      "
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

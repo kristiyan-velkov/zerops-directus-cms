@@ -1,0 +1,212 @@
+zerops:
+  # Single setup used by both Development and Production environments.
+  # Environment-specific secrets (SECRET, ADMIN_PASSWORD, ADMIN_TOKEN) are
+  # injected from each environment's import.yaml via 'envSecrets'.
+  # Service-reference variables (DB_HOST, REDIS_HOST, etc.) are resolved
+  # at runtime by Zerops' built-in env-var interpolation system.
+  - setup: directus
+
+    build:
+      base: nodejs@22
+      buildCommands:
+        # Install only production dependencies.
+        # '--omit=dev' excludes devDependencies, keeping the deploy
+        # artifact small and the attack surface minimal.
+        - npm install --omit=dev
+
+      deployFiles:
+        # The entire node_modules directory is deployed so the runtime
+        # container does not need to perform any npm install steps.
+        - node_modules
+        - package.json
+        - package-lock.json
+        # Custom extensions directory — contains:
+        #   snapshot.yaml  schema snapshot applied by 'directus schema apply'
+        #   seed.js        demo data seeder called via 'node extensions/seed.js'
+        - extensions
+
+      # Persist node_modules between builds so npm install only fetches
+      # new or changed packages, significantly speeding up subsequent deploys.
+      cache: node_modules
+
+    deploy:
+      readinessCheck:
+        httpGet:
+          port: 8055
+          # Directus exposes a structured health endpoint that reports the
+          # status of the app, database connection, and storage provider.
+          path: /server/health
+        # Allow up to 3 minutes on the very first deploy:
+        # initCommands run bootstrap (system schema + admin user) then
+        # 'database migrate:latest' (custom schema + seed data) before
+        # the HTTP server accepts any traffic.
+        failureTimeout: 180
+        retryPeriod: 5
+
+    run:
+      base: nodejs@22
+
+      envVariables:
+        # ── Directus Core ────────────────────────────────────────────────────
+        # Path where Directus discovers custom migrations, hooks, and endpoints.
+        # Must match the directory deployed via deployFiles above.
+        # Custom migrations in ./extensions/migrations/ are applied by the
+        # 'database migrate:latest' initCommand (the second step after bootstrap).
+        EXTENSIONS_PATH: ./extensions
+
+        # Directus is licensed under BSL 1.1. Setting ACCEPT_TERMS=true
+        # is required to acknowledge and accept the licence on startup.
+        # Without it, the process will refuse to start.
+        # See: https://directus.io/license
+        ACCEPT_TERMS: "true"
+
+        # Opt out of anonymous usage statistics sent to the Directus team.
+        TELEMETRY: "false"
+
+        # The canonical public URL of this Directus instance.
+        # Used for: OAuth redirect URIs, password-reset links, file URLs in
+        # email notifications, and CORS origin checks.
+        # ⚠️  IMPORTANT: Update this value after the first deploy once your
+        # Zerops subdomain URL is known (e.g. https://<app>.<project>.zerops.app).
+        # Until it is set, OAuth flows and email links will contain an empty host.
+        PUBLIC_URL: ""
+
+        # Default admin email — changeable after first deploy.
+        # Together with ADMIN_PASSWORD (set as a secret in import.yaml),
+        # this seeds the first administrator account during 'directus bootstrap'.
+        ADMIN_EMAIL: admin@example.com
+
+        # ── Database (PostgreSQL) ─────────────────────────────────────────────
+        # Directus requires the 'pg' (node-postgres) driver for PostgreSQL.
+        DB_CLIENT: pg
+
+        # Zerops injects ${db_hostname} automatically once the PostgreSQL
+        # service named 'db' is created in the same project.
+        DB_HOST: ${db_hostname}
+        DB_PORT: "5432"
+
+        # By Zerops convention the default database name equals the service
+        # hostname, so DB_DATABASE and DB_HOST share the same value.
+        DB_DATABASE: ${db_hostname}
+        DB_USER: ${db_user}
+        DB_PASSWORD: ${db_password}
+
+        # Connection pool: min=2 keeps warm connections ready for burst traffic;
+        # max=10 prevents exhausting the database under heavy concurrent load.
+        DB_POOL__MIN: "2"
+        DB_POOL__MAX: "10"
+
+        # ── Cache / Pub-Sub (Valkey / Redis) ─────────────────────────────────
+        REDIS_HOST: ${cache_hostname}
+        REDIS_PORT: "6379"
+
+        # SYNCHRONIZATION_STORE=redis is mandatory in multi-container (HA)
+        # deployments. Directus uses it to broadcast schema cache invalidations,
+        # rate-limit counters, and auth-token blacklists across all running
+        # containers. Without it, each container maintains its own in-process
+        # state, which causes stale-cache bugs and split-brain auth issues.
+        SYNCHRONIZATION_STORE: redis
+
+        # ── Object Storage (S3-compatible) ────────────────────────────────────
+        # Zerops object-storage is exposed as an S3-compatible API.
+        # STORAGE_LOCATIONS=s3 tells Directus to use S3 as the sole storage
+        # driver for all file uploads.
+        STORAGE_LOCATIONS: s3
+        STORAGE_S3_DRIVER: s3
+
+        # Credentials and bucket details are injected from the Zerops
+        # object-storage service env vars (prefix: storage_).
+        STORAGE_S3_KEY: ${storage_accessKeyId}
+        STORAGE_S3_SECRET: ${storage_secretAccessKey}
+        STORAGE_S3_BUCKET: ${storage_bucketName}
+
+        # Custom S3 endpoint pointing at the Zerops object-storage API.
+        STORAGE_S3_ENDPOINT: ${storage_apiUrl}
+
+        # The Zerops S3 implementation is region-agnostic.
+        # 'us-east-1' satisfies the AWS SDK region requirement without
+        # affecting any routing or behavior.
+        STORAGE_S3_REGION: us-east-1
+
+        # Path-style URLs are required when using a custom S3 endpoint.
+        # Virtual-hosted-style (the default) would prefix the bucket name to
+        # the hostname (bucket.host), which the Zerops object-storage API
+        # does not support. Path-style keeps the bucket name in the URL path
+        # (/bucket/key), which is what the Zerops API expects.
+        STORAGE_S3_FORCE_PATH_STYLE: "true"
+
+        # Make uploaded files publicly readable without requiring signed URLs.
+        # Required for serving images in the Directus Data Studio and via
+        # the /assets endpoint without authentication.
+        STORAGE_S3_ACL: public-read
+
+        # ── Email (SMTP) ──────────────────────────────────────────────────────
+        # Development: pre-wired to the Mailpit SMTP sink service.
+        #   Mailpit captures all outbound email — no real messages are sent.
+        #   Open the Mailpit web UI (port 8025) to inspect captured emails.
+        #
+        # Production: override these variables via the Zerops GUI or by adding
+        #   envVariables in your import YAML before deploying:
+        #     DIRECTUS_SMTP_HOST: smtp.sendgrid.net
+        #     DIRECTUS_SMTP_PORT: 587
+        #     DIRECTUS_SMTP_USER: apikey
+        #     DIRECTUS_SMTP_PASSWORD: <your-sendgrid-api-key>
+        #     DIRECTUS_EMAIL_FROM: no-reply@yourdomain.com
+        #   Then set EMAIL_SMTP_SECURE=true if your provider requires TLS.
+        EMAIL_TRANSPORT: smtp
+        EMAIL_SMTP_HOST: ${DIRECTUS_SMTP_HOST:-mailpit}
+        EMAIL_SMTP_PORT: ${DIRECTUS_SMTP_PORT:-1025}
+        EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@directus.local}
+
+      ports:
+        - port: 8055
+          httpSupport: true
+
+      initCommands:
+        # Step 1 — System bootstrap (idempotent, safe on every container start).
+        #
+        # What it does on FIRST run:
+        #   1. Connects to the database and creates all Directus system tables.
+        #   2. Applies Directus built-in migrations.
+        #   3. Creates the first admin user (ADMIN_EMAIL + ADMIN_PASSWORD).
+        #
+        # What it does on SUBSEQUENT runs:
+        #   - System tables already exist → no-op, exits in milliseconds.
+        #
+        # Distributed-lock safety: Directus uses an advisory lock in PostgreSQL so
+        # that when multiple containers start simultaneously (scale-out), only one
+        # runs migrations while the others wait — no duplicate schema changes.
+        - node_modules/.bin/directus bootstrap
+
+        # Step 2 — Schema apply (idempotent via Directus diff engine).
+        #
+        # Applies the schema snapshot at extensions/snapshot.yaml, which defines
+        # the categories, authors, and posts collections with all fields and
+        # relations. Uses Directus's own schema diffing — safer and more reliable
+        # than raw Knex migrations. Already-existing schema changes are skipped.
+        - node_modules/.bin/directus schema apply --yes ./extensions/snapshot.yaml
+
+        # Step 3 — Seed demo data via Directus SDK (idempotent).
+        #
+        # seed-runner.sh starts a temporary Directus server in the background,
+        # waits until /server/health returns "ok", then calls seed.js which uses
+        # @directus/sdk + ADMIN_TOKEN to insert categories, authors, and posts.
+        # Collections that already have data are skipped — safe on every redeploy.
+        # The temporary server is killed once seeding finishes; the real server
+        # starts via the 'start' command below.
+        - sh extensions/seed-runner.sh
+
+      start: node_modules/.bin/directus start
+
+      healthCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+        # Allow 60 s for Directus to restart before Zerops marks it unhealthy.
+        failureTimeout: 60
+        # Remove the container from the load balancer immediately once unhealthy.
+        disconnectTimeout: 30
+        # Allow 30 s for a graceful recovery before Zerops restarts the container.
+        recoveryTimeout: 30
+        # Poll the health endpoint every 15 s during normal operation.
+        execPeriod: 15

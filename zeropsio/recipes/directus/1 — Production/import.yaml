@@ -1,0 +1,77 @@
+# zeropsPreprocessor=on
+project:
+  name: directus-production
+  # SERIOUS corePackage allocates dedicated cluster resources appropriate
+  # for a production workload with HA services.
+  corePackage: SERIOUS
+
+services:
+  # ── 1. PostgreSQL database (HA) ───────────────────────────────────────────
+  # Highly-available PostgreSQL cluster with automatic failover.
+  # Deployed first (priority 10) so the database is ready before
+  # any Directus container starts its initCommands.
+  - hostname: db
+    type: postgresql@16
+    mode: HA
+    priority: 10
+
+  # ── 2. Valkey cache / pub-sub (HA) ────────────────────────────────────────
+  # Highly-available Valkey cluster required for multi-container Directus.
+  # Directus uses Valkey (via SYNCHRONIZATION_STORE=redis) to synchronise:
+  #   - Schema cache invalidations  (prevents stale schema bugs)
+  #   - Rate-limit counters         (prevents bypassing limits by hitting different containers)
+  #   - Auth token blacklists       (ensures logout is respected by all containers)
+  # Without HA Valkey, a single cache node failure would bring down
+  # session handling for all Directus containers simultaneously.
+  - hostname: cache
+    type: valkey@7.2
+    mode: HA
+    priority: 9
+
+  # ── 3. S3-compatible object storage ──────────────────────────────────────
+  # 50 GB for production file uploads. 'public-read' makes assets accessible
+  # without signed URLs — required for Directus asset serving and image
+  # transformations via the /assets endpoint.
+  - hostname: storage
+    type: object-storage
+    priority: 8
+    objectStorageSize: 50
+    objectStoragePolicy: public-read
+
+  # ── 4. Directus application (multi-container) ────────────────────────────
+  # 2–6 containers with load-balanced traffic.
+  # minContainers=2 ensures zero-downtime rolling upgrades:
+  #   Zerops starts new containers and waits for the readiness check to pass
+  #   before terminating old ones.
+  # maxContainers=6 allows horizontal scale-out under traffic spikes.
+  #
+  # NOTE: Mailpit is intentionally excluded from the production environment.
+  # Configure a real SMTP provider by setting environment variables on this
+  # service after deploy (see README for instructions):
+  #   DIRECTUS_SMTP_HOST, DIRECTUS_SMTP_PORT, DIRECTUS_EMAIL_FROM
+  #   EMAIL_SMTP_USER (secret), EMAIL_SMTP_PASSWORD (secret)
+  - hostname: directus
+    type: nodejs@22
+    buildFromGit: https://github.com/zerops-recipe-apps/directus-app
+    enableSubdomainAccess: true
+    minContainers: 2
+    maxContainers: 6
+    verticalAutoscaling:
+      minRam: 1
+      maxRam: 16
+      minCpu: 1
+      maxCpu: 10
+    envSecrets:
+      # SECRET signs every JWT issued by Directus (access tokens, refresh
+      # tokens, password-reset tokens). Must be a long random string.
+      # Rotating this value invalidates all existing sessions.
+      SECRET: <@generateRandomString(<64>)>
+
+      # Admin account credentials seeded by 'directus bootstrap' on first run.
+      # Retrieve these from the service's Secret Variables panel after deploy.
+      # Change the admin email (ADMIN_EMAIL) to a real address after first login.
+      ADMIN_PASSWORD: <@generateRandomString(<20>)>
+
+      # Static API token for CI/CD pipelines and automation scripts.
+      # Use this for programmatic access instead of password-based logins.
+      ADMIN_TOKEN: <@generateRandomString(<40>)>
