@@ -30,7 +30,7 @@ This is a development environment for [Directus (info + deploy)](https://app.zer
 > [!NOTE]
 > Directus releases: https://github.com/directus/directus/releases
 
-1. In your fork of [directus-app](https://github.com/zerops-recipe-apps/directus-app), update `package.json`:
+1. In your fork of [zerops-directus-cms](https://github.com/kristiyan-velkov/zerops-directus-cms), update `package.json`:
    ```json
    "directus": "11.x.x"
    ```

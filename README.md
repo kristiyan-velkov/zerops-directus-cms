@@ -187,8 +187,8 @@ Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as env **secrets**.
 Mirrors the Zerops production stack exactly using Docker Compose:
 
 ```bash
-git clone https://github.com/zerops-recipe-apps/directus-app
-cd directus-app
+git clone https://github.com/kristiyan-velkov/zerops-directus-cms
+cd zerops-directus-cms
 cp .env.example .env
 docker compose up -d
 ```
