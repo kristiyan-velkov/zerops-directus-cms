@@ -38,7 +38,7 @@ services:
   # to Mailpit instead of a real mail server — safe for development.
   # Open the Mailpit web UI (port 8025) via the service subdomain to inspect
   # captured messages.
-  - hostname: mailpit
+  - hostname: mail
     type: alpine@3.21
     buildFromGit: https://github.com/zerops-recipe-apps/mailpit-app
     enableSubdomainAccess: true
