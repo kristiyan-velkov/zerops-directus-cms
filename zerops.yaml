@@ -9,10 +9,10 @@ zerops:
     build:
       base: nodejs@22
       buildCommands:
-        # Install only production dependencies.
-        # '--omit=dev' excludes devDependencies, keeping the deploy
-        # artifact small and the attack surface minimal.
-        - npm install --omit=dev
+        # npm ci installs the exact dependency tree from package-lock.json —
+        # reproducible, faster than npm install, and fails on lockfile drift.
+        # '--omit=dev' keeps the deploy artifact lean and attack surface minimal.
+        - npm ci --omit=dev
 
       deployFiles:
         # The entire node_modules directory is deployed so the runtime
@@ -106,6 +106,12 @@ zerops:
         # containers. Without it, each container maintains its own in-process
         # state, which causes stale-cache bugs and split-brain auth issues.
         SYNCHRONIZATION_STORE: redis
+
+        # Enable the shared HTTP response cache backed by Valkey.
+        # Without this, each container keeps its own in-process cache; with it
+        # all containers share one cache store and invalidations are instant.
+        CACHE_ENABLED: "true"
+        CACHE_STORE: redis
 
         # ── Object Storage (S3-compatible) ────────────────────────────────────
         # Zerops object-storage is exposed as an S3-compatible API.
