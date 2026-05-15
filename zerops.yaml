@@ -40,8 +40,8 @@ zerops:
         # Note: initCommands (bootstrap → schema apply → seed-runner.sh) run
         # BEFORE 'start', so this timeout only covers the actual server startup
         # time — which is fast once all migrations and seeding are complete.
-        failureTimeout: 180
-        retryPeriod: 5
+        failureTimeout: 180s
+        retryPeriod: 5s
 
     run:
       base: nodejs@22
@@ -210,10 +210,10 @@ zerops:
           port: 8055
           path: /server/health
         # Allow 60 s for Directus to restart before Zerops marks it unhealthy.
-        failureTimeout: 60
+        failureTimeout: 60s
         # Remove the container from the load balancer immediately once unhealthy.
-        disconnectTimeout: 30
+        disconnectTimeout: 30s
         # Allow 30 s for a graceful recovery before Zerops restarts the container.
-        recoveryTimeout: 30
+        recoveryTimeout: 30s
         # Poll the health endpoint every 15 s during normal operation.
-        execPeriod: 15
+        execPeriod: 15s
