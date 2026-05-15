@@ -1,5 +1,5 @@
 {
-  "name": "directus-app",
+  "name": "zerops-directus-cms",
   "version": "1.0.0",
   "description": "Directus headless CMS — production-ready Zerops recipe with PostgreSQL, Valkey, S3 object storage, and auto-seeded demo content.",
   "private": true,

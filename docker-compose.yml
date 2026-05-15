@@ -106,7 +106,7 @@ services:
   #   2. schema apply — custom collections via native Directus diff engine (idempotent)
   #   3. start (bg)   — server starts in background so the SDK can reach it
   #   4. health poll  — waits until /server/health returns "ok"
-  #   5. seed.js      — inserts demo data via @directus/sdk + ADMIN_TOKEN
+  #   5. seed.js      — inserts demo data via Node 22 built-in fetch + ADMIN_TOKEN
   #   6. wait         — keeps container alive with the foreground server process
   directus:
     image: directus/directus:11.17.4

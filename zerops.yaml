@@ -186,11 +186,12 @@ zerops:
         # than raw Knex migrations. Already-existing schema changes are skipped.
         - node_modules/.bin/directus schema apply --yes ./extensions/snapshot.yaml
 
-        # Step 3 — Seed demo data via Directus SDK (idempotent).
+        # Step 3 — Seed demo data via REST API (idempotent).
         #
         # seed-runner.sh starts a temporary Directus server in the background,
         # waits until /server/health returns "ok", then calls seed.js which uses
-        # @directus/sdk + ADMIN_TOKEN to insert categories, authors, and posts.
+        # Node 22's built-in fetch + ADMIN_TOKEN to insert categories, authors,
+        # and posts via the Directus REST API. No external dependencies required.
         # Collections that already have data are skipped — safe on every redeploy.
         # The temporary server is killed once seeding finishes; the real server
         # starts via the 'start' command below.

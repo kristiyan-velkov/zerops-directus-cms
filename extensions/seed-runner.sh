@@ -9,7 +9,7 @@
 # Running it here only to satisfy the SDK's HTTP requirement during seeding.
 #
 # Required env vars (all set by zerops.yaml envVariables / envSecrets):
-#   ADMIN_TOKEN   static token for SDK authentication
+#   ADMIN_TOKEN   static token for REST API authentication
 #   DIRECTUS_URL  optional override (defaults to http://localhost:8055)
 
 set -e
