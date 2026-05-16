@@ -56,10 +56,12 @@ services:
   - hostname: directus
     type: nodejs@22
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
-    # zerops.yaml contains a single `setup: directus` block whose initCommands
-    # run bootstrap → schema apply. Demo content is then seeded by the
-    # `extensions/directus-extension-seed-demo` extension hook on every `server.start`,
+    # `zeropsSetup: dev` selects the `setup: dev` block from zerops.yaml.
+    # It extends `setup: base` (shared env variables) and adds the dev-specific
+    # build and initCommands. Demo content is seeded by the
+    # `extensions/directus-extension-seed-demo` hook on every `server.start`,
     # so deleted rows auto-recover on the next container restart.
+    zeropsSetup: dev
     enableSubdomainAccess: true
     minContainers: 1
     maxContainers: 1

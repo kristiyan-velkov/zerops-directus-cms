@@ -1,47 +1,11 @@
 # yaml-language-server: $schema=https://api.app-prg1.zerops.io/api/rest/public/settings/zerops-yaml-json-schema.json
 
-# Single-setup design. Both Development and Production import.yaml files refer
-# to this same `setup: directus` block — production-specific differences
-# (HA database, multiple containers, real SMTP) are expressed in the recipe
-# import files via service config and environment variables, NOT by forking
-# the zerops.yaml.
-
 zerops:
-  - setup: directus
-
-    build:
-      base: nodejs@22
-      buildCommands:
-        # npm ci installs the exact dependency tree from package-lock.json —
-        # reproducible, faster than npm install, and fails on lockfile drift.
-        # `--omit=dev` keeps the deploy artifact lean and the attack surface
-        # minimal.
-        - npm ci --omit=dev
-
-      deployFiles:
-        - node_modules
-        - package.json
-        - package-lock.json
-        # Strapi-style layout (see github.com/zerops-recipe-apps/strapi-app):
-        #   data/                       raw seed input (data.json + uploads/)
-        #   database/snapshot.yaml      schema applied by `directus schema apply`
-        #   extensions/directus-extension-seed-demo  auto-healing demo content seeder (ESM hook)
-        - data
-        - database
-        - extensions
-
-      # Persist node_modules between builds so npm ci only fetches new or
-      # changed packages, significantly speeding up subsequent deploys.
-      cache: node_modules
-
-    deploy:
-      readinessCheck:
-        httpGet:
-          port: 8055
-          # Directus exposes a structured health endpoint that reports the
-          # status of the app, database connection, and storage provider.
-          path: /server/health
-
+  # ── base ──────────────────────────────────────────────────────────────────
+  # Shared run configuration inherited by both `prod` and `dev` setups via
+  # `extends: base`. Keeps env variables DRY — only the initCommands and
+  # build section differ between environments.
+  - setup: base
     run:
       base: nodejs@22
 
@@ -50,52 +14,36 @@ zerops:
           httpSupport: true
 
       envVariables:
-        # ── Directus Core ─────────────────────────────────────────────────────
-        # Directus is licensed under BSL 1.1. Setting ACCEPT_TERMS=true is
-        # required to acknowledge the licence on startup — without it the
-        # process refuses to start. See https://directus.io/license
+        # ── Directus Core ───────────────────────────────────────────────────
+        # BSL 1.1 licence acknowledgement — required, process refuses to start without it.
         ACCEPT_TERMS: "true"
-
-        # Opt out of anonymous usage statistics.
+        # Disable anonymous usage statistics.
         TELEMETRY: "false"
-
-        # Canonical public URL — used for OAuth redirect URIs, password-reset
-        # links, file URLs in email notifications, and CORS checks.
-        # ⚠️  Update this after the first deploy once your Zerops subdomain
-        # is known (e.g. https://<app>.<project>.zerops.app).
+        # Set this to your subdomain URL after first deploy (e.g. https://<app>.zerops.app).
+        # Required for OAuth redirect URIs, password-reset links, and CORS.
         PUBLIC_URL: ""
-
-        # Default admin email — changeable after first deploy. Together with
-        # ADMIN_PASSWORD (set as a secret in import.yaml), seeds the first
-        # administrator account during `directus bootstrap`.
+        # Initial admin email — change in Data Studio after first login.
         ADMIN_EMAIL: admin@example.com
 
         # ── Database (PostgreSQL) ────────────────────────────────────────────
         DB_CLIENT: pg
         DB_HOST: ${db_hostname}
         DB_PORT: "5432"
-        # By Zerops convention the database name equals the service hostname,
-        # so DB_DATABASE and DB_HOST share the same value.
+        # Zerops convention: database name equals the service hostname.
         DB_DATABASE: ${db_hostname}
         DB_USER: ${db_user}
         DB_PASSWORD: ${db_password}
-        # Connection pool: min=2 keeps warm connections ready for burst
-        # traffic; max=10 prevents exhausting the database under heavy load.
+        # min=2 keeps warm connections ready; max=10 prevents DB exhaustion under load.
         DB_POOL__MIN: "2"
         DB_POOL__MAX: "10"
 
-        # ── Cache / Pub-Sub (Valkey / Redis) ─────────────────────────────────
+        # ── Cache / Pub-Sub (Valkey) ─────────────────────────────────────────
         REDIS_HOST: ${cache_hostname}
         REDIS_PORT: "6379"
-
-        # SYNCHRONIZATION_STORE=redis is mandatory in multi-container (HA)
-        # deployments. Directus uses it to broadcast schema cache
-        # invalidations, rate-limit counters, and auth-token blacklists across
-        # all running containers. Harmless in single-container dev.
+        # Required for multi-container HA: broadcasts schema cache invalidations,
+        # rate-limit counters, and auth-token blacklists across all containers.
+        # Harmless in single-container dev.
         SYNCHRONIZATION_STORE: redis
-
-        # Externalised HTTP response cache — every container shares one cache
-        # store via Valkey, so invalidations are instant and consistent.
         CACHE_ENABLED: "true"
         CACHE_STORE: redis
 
@@ -106,40 +54,92 @@ zerops:
         STORAGE_S3_SECRET: ${storage_secretAccessKey}
         STORAGE_S3_BUCKET: ${storage_bucketName}
         STORAGE_S3_ENDPOINT: ${storage_apiUrl}
-        # Zerops S3 is region-agnostic; us-east-1 just satisfies the AWS SDK
-        # region requirement.
+        # us-east-1 satisfies the AWS SDK requirement; routing is region-agnostic on Zerops.
         STORAGE_S3_REGION: us-east-1
-        # Path-style is mandatory for custom S3 endpoints (Zerops, MinIO).
-        # Virtual-hosted-style would put the bucket in the hostname, which
-        # the Zerops endpoint does not support.
+        # Path-style required for custom S3 endpoints — bucket name goes in the URL path,
+        # not the hostname (virtual-hosted style is not supported on Zerops / MinIO).
         STORAGE_S3_FORCE_PATH_STYLE: "true"
-        # public-read serves /assets without signed URLs (required for image
-        # previews in the Data Studio).
+        # public-read serves /assets without signed URLs — required for Data Studio previews.
         STORAGE_S3_ACL: public-read
 
         # ── Email (SMTP) ─────────────────────────────────────────────────────
-        # Development: defaults route to the Mailpit SMTP sink service.
-        # Production: override DIRECTUS_SMTP_HOST / DIRECTUS_SMTP_PORT /
-        # DIRECTUS_EMAIL_FROM in the Zerops GUI to use a real provider.
+        # Dev default: Mailpit SMTP sink. Override in the Zerops GUI for production:
+        #   DIRECTUS_SMTP_HOST, DIRECTUS_SMTP_PORT, DIRECTUS_EMAIL_FROM
         EMAIL_TRANSPORT: smtp
         EMAIL_SMTP_HOST: ${DIRECTUS_SMTP_HOST:-mailpit}
         EMAIL_SMTP_PORT: ${DIRECTUS_SMTP_PORT:-1025}
         EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@directus.local}
 
-      # Run-time data setup. Order matters:
-      #   1. bootstrap        creates system tables + admin user (no-op on
-      #                       redeploy thanks to the "Database already
-      #                       initialized" check)
-      #   2. schema apply     creates / diffs content collections from
-      #                       database/snapshot.yaml
-      #
-      # Demo content is seeded by the `extensions/directus-extension-seed-demo/` extension
-      # hook on every `server.start` event — auto-healing if rows are deleted
-      # via the Data Studio. No third initCommand needed.
-      #
-      # zsc execOnce ensures only one container per deploy runs each step in
-      # a multi-container HA setup; the rest skip straight to `start`.
+  # ── prod ──────────────────────────────────────────────────────────────────
+  # Production setup. Referenced in recipes/directus/1 — Production/import.yaml
+  # via `zeropsSetup: prod`. Extends base for all env variables.
+  - setup: prod
+    extends: base
+
+    build:
+      base: nodejs@22
+      buildCommands:
+        # npm ci = reproducible build from lockfile; --omit=dev keeps the artifact lean.
+        - npm ci --omit=dev
+      deployFiles:
+        - node_modules
+        - package.json
+        - package-lock.json
+        # data/          — raw seed input (data.json + uploads/)
+        # database/      — snapshot.yaml applied by `directus schema apply`
+        # extensions/    — directus-extension-seed-demo auto-healing hook
+        - data
+        - database
+        - extensions
+      cache: node_modules
+
+    deploy:
+      readinessCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
+    run:
+      # zsc execOnce: only the first container per deploy runs each command.
+      # Remaining containers in the HA pool see the lock taken and skip to `start`.
       # See https://docs.zerops.io/references/zsc#execonce
+      initCommands:
+        - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
+        - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
+
+      start: node_modules/.bin/directus start
+
+      healthCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
+  # ── dev ───────────────────────────────────────────────────────────────────
+  # Development setup. Referenced in recipes/directus/0 — Development/import.yaml
+  # via `zeropsSetup: dev`. Extends base for all env variables.
+  - setup: dev
+    extends: base
+
+    build:
+      base: nodejs@22
+      buildCommands:
+        - npm ci --omit=dev
+      deployFiles:
+        - node_modules
+        - package.json
+        - package-lock.json
+        - data
+        - database
+        - extensions
+      cache: node_modules
+
+    deploy:
+      readinessCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
+    run:
       initCommands:
         - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
         - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
