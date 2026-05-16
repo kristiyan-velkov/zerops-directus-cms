@@ -62,12 +62,14 @@ zerops:
         # public-read serves /assets without signed URLs — required for Data Studio previews.
         STORAGE_S3_ACL: public-read
 
-        # ── Email (SMTP) ─────────────────────────────────────────────────────
-        # Dev default: Mailpit SMTP sink. Override in the Zerops GUI for production:
-        #   DIRECTUS_SMTP_HOST, DIRECTUS_SMTP_PORT, DIRECTUS_EMAIL_FROM
-        EMAIL_TRANSPORT: smtp
-        EMAIL_SMTP_HOST: ${DIRECTUS_SMTP_HOST:-mailpit}
-        EMAIL_SMTP_PORT: ${DIRECTUS_SMTP_PORT:-1025}
+        # ── Email ────────────────────────────────────────────────────────────
+        # No email transport is set here intentionally — each environment
+        # defines its own transport (dev overrides to Mailpit below;
+        # production falls back to Directus's default sendmail, which
+        # passes the /server/health check without needing a network connection).
+        # Configure a real SMTP provider in the Zerops GUI by setting:
+        #   EMAIL_TRANSPORT, EMAIL_SMTP_HOST, EMAIL_SMTP_PORT,
+        #   EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, EMAIL_FROM
         EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@directus.local}
 
   # ── prod ──────────────────────────────────────────────────────────────────
@@ -140,6 +142,15 @@ zerops:
           path: /server/health
 
     run:
+      envVariables:
+        # ── Email (Mailpit SMTP sink) ─────────────────────────────────────────
+        # Dev-only: route all outgoing email to Mailpit for inspection in its UI.
+        # In production this block is absent; Directus defaults to sendmail
+        # (no network health check), so /server/health stays green without SMTP.
+        EMAIL_TRANSPORT: smtp
+        EMAIL_SMTP_HOST: mailpit
+        EMAIL_SMTP_PORT: "1025"
+
       initCommands:
         - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
         - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
