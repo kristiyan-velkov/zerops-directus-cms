@@ -68,7 +68,7 @@ services:
       minRam: 1
       maxRam: 16
       minCpu: 1
-      maxCpu: 10
+      maxCpu: 8
     envSecrets:
       # SECRET signs every JWT issued by Directus (access tokens, refresh
       # tokens, password-reset tokens). Must be a long random string.

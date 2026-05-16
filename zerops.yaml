@@ -41,11 +41,6 @@ zerops:
           # Directus exposes a structured health endpoint that reports the
           # status of the app, database connection, and storage provider.
           path: /server/health
-        # initCommands (bootstrap → schema apply) run BEFORE
-        # 'start', so this timeout only covers the actual server boot — which
-        # is fast (<5 s) once the data layer is already prepared.
-        failureTimeout: 120
-        retryPeriod: 3
 
     run:
       base: nodejs@22
@@ -155,11 +150,3 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
-        # Allow 60 s for Directus to restart before Zerops marks it unhealthy.
-        failureTimeout: 60
-        # Remove the container from the load balancer immediately once unhealthy.
-        disconnectTimeout: 30
-        # Allow 30 s for a graceful recovery before Zerops restarts the container.
-        recoveryTimeout: 30
-        # Poll the health endpoint every 15 s during normal operation.
-        execPeriod: 15
