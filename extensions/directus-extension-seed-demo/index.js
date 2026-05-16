@@ -1,41 +1,67 @@
 /**
- * Directus extension hook — auto-healing demo content seeder
+ * Directus extension hook — production-grade demo content seeder
  *
- * Loaded automatically by Directus from EXTENSIONS_PATH (./extensions by
- * default). Registered against the `server.start` action event, which fires
- * after the HTTP server is listening and the schema is fully loaded — safer
- * than `init.app.after`, where schema may not be ready (see directus#25500).
+ * Loaded automatically by Directus from EXTENSIONS_PATH. Registered against
+ * the `server.start` action event, which fires after the HTTP server is
+ * listening and the schema is fully loaded.
  *
- * Why a hook instead of a migration?
- *   • Auto-heal — if rows are deleted from the Data Studio, the next container
- *     restart refills them. The migration system records "done" exactly once
- *     and would not re-run.
- *   • Same speed — uses the open Knex instance Directus already maintains.
- *     No HTTP, no /auth/login, no /server/health polling. ~5 ms when tables
- *     have content (just 3 × `SELECT 1`), ~50 ms when seeding from scratch.
- *   • Plain ESM .js — Directus loads extensions as ES modules, so we can use
- *     `import`/`export` and `import.meta.url` natively (no .cjs workaround).
+ * Design decisions:
+ *   • seed_runs table  — run-once guarantee: each SEED_VERSION is recorded
+ *     inside the same transaction as the content inserts, so a partial failure
+ *     never marks the seed as complete.
+ *   • Direct Knex      — no HTTP round-trips; runs inside the process that
+ *     already owns the DB connection. Safe for Zerops HA (minContainers ≥ 2):
+ *     PostgreSQL row-level locking prevents duplicate inserts.
+ *   • S3 compensation  — if the collection transaction rolls back, files that
+ *     were uploaded in this run are deleted to avoid orphaned objects.
+ *   • File idempotency — keyed on filename_download, not title, because title
+ *     is user-editable and would break the idempotency check after first use.
  *
  * Edge case NOT handled here:
  *   Deleting an entire collection through the Data Studio drops the underlying
- *   Postgres table and corrupts the schema cache (Directus issue #22674).
- *   On the next restart, `directus schema apply` silently no-ops because the
- *   cached schema still matches the snapshot. This hook detects the missing
- *   table via `knex.schema.hasTable()` and logs a clear warning, but cannot
- *   recreate the table itself — that requires `docker compose down -v` to
- *   wipe the schema cache, or a manual `directus schema apply` after the
- *   container has fully booted.
+ *   Postgres table and corrupts the schema cache (Directus issue #22674). This
+ *   hook detects the missing table via `knex.schema.hasTable()` and logs a
+ *   clear warning, but cannot recreate the table — run
+ *   `directus schema apply --yes ./database/snapshot.yaml` to recover.
  */
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { readFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// The extension lives at <root>/extensions/directus-extension-seed-demo/index.js,
-// so the data.json file is two levels up + into the data/ directory.
 const DATA_PATH = resolve(__dirname, '..', '..', 'data', 'data.json');
+const DATA_DIR  = resolve(__dirname, '..', '..', 'data');
 
 const COLLECTIONS = ['categories', 'authors', 'posts'];
+const KNOWN_KEYS  = new Set([...COLLECTIONS, 'files', 'admin', 'dashboard']);
+
+// Explicit allowlist of fields that may be patched on the admin user.
+// Using a spread of data.admin would silently pass arbitrary fields
+// (e.g. email, password) into a raw UPDATE — this prevents that.
+const ADMIN_PATCHABLE_FIELDS = ['avatar', 'title', 'location', 'description', 'tags'];
+
+const UPLOAD_MAX_ATTEMPTS  = 3;
+const UPLOAD_BASE_DELAY_MS = 100;
+
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Create the seed_runs bookkeeping table if it does not yet exist.
+ * DDL is executed outside any transaction — PostgreSQL auto-commits CREATE.
+ */
+async function ensureSeedRunsTable(db) {
+  const exists = await db.schema.hasTable('seed_runs');
+  if (exists) return;
+  await db.schema.createTable('seed_runs', (t) => {
+    t.string('seed_version').primary().notNullable();
+    t.timestamp('ran_at', { useTz: true }).notNullable().defaultTo(db.fn.now());
+  });
+}
 
 /**
  * For each column on the destination table, look up its Postgres type. JSON
@@ -63,52 +89,287 @@ async function serialiseJsonColumns(trx, table, rows) {
   });
 }
 
-export default ({ action }, { database, logger }) => {
-  // Scope the logger so seed lines are easy to grep in the structured Pino log.
+/**
+ * Upload a local file via FilesService with retry + exponential backoff.
+ *
+ * Idempotency is keyed on `filename_download` (not `title`) because title is
+ * user-editable; a changed title would trigger a duplicate upload on restart.
+ *
+ * Returns { id, isNew }:
+ *   id    — directus_files UUID (null if the file was not found on disk)
+ *   isNew — true only when this call performed the actual upload, so the
+ *           caller can track newly uploaded IDs for S3 compensation.
+ */
+async function seedFile(fileDef, { FilesService, database, schema, logger: log }) {
+  const { path: relPath, title, type = 'image/webp', description, tags } = fileDef;
+  const filePath = resolve(DATA_DIR, relPath);
+  const filename = relPath.split('/').pop();
+
+  // Skip gracefully when the binary is absent (e.g. not committed to git).
+  try {
+    await access(filePath);
+  } catch {
+    log.warn({ filename }, 'Upload file not found on disk — skipping image seed.');
+    return { id: null, isNew: false };
+  }
+
+  // Idempotency check — keyed on filename_download, not title.
+  const existing = await database('directus_files')
+    .select('id')
+    .where({ filename_download: filename })
+    .first();
+  if (existing) {
+    log.debug({ filename, id: existing.id }, 'File already uploaded — reusing existing ID.');
+    return { id: existing.id, isNew: false };
+  }
+
+  const filesService    = new FilesService({ knex: database, schema });
+  const storageLocation = (process.env.STORAGE_LOCATIONS ?? 'local').split(',')[0].trim();
+
+  for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
+    try {
+      const stream = createReadStream(filePath);
+      const id = await filesService.uploadOne(stream, {
+        title,
+        filename_download: filename,
+        type,
+        storage: storageLocation,
+        ...(description != null && { description }),
+        // tags is a JSONB column — must be a JSON string, not a plain array.
+        ...(tags != null && { tags: JSON.stringify(tags) }),
+      });
+      log.info({ filename, id, attempt }, 'Seeded demo file.');
+      return { id, isNew: true };
+    } catch (err) {
+      if (attempt === UPLOAD_MAX_ATTEMPTS) throw err;
+      const delay = UPLOAD_BASE_DELAY_MS * 2 ** (attempt - 1); // 100 → 200 → throw
+      log.warn({ filename, attempt, delay, err: err.message }, 'File upload failed — retrying.');
+      await sleep(delay);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+export default ({ action }, { database, logger, services, getSchema }) => {
   const log = logger.child({ extension: 'seed-demo' });
 
   action('server.start', async () => {
+
+    // ── 0. Seed version guard ────────────────────────────────────────────
+    // SEED_VERSION must be set explicitly. If absent the operator has not
+    // opted in to seeding — skip rather than seed blindly.
+    const seedVersion = process.env.SEED_VERSION;
+    if (!seedVersion) {
+      log.warn('SEED_VERSION env var is not set — skipping seed. Set it to a non-empty string to enable seeding.');
+      return;
+    }
+
+    // ── 1. Run-once check ────────────────────────────────────────────────
+    await ensureSeedRunsTable(database);
+    const alreadyRan = await database('seed_runs').where({ seed_version: seedVersion }).first();
+    if (alreadyRan) {
+      log.info({ seedVersion }, 'Seed version already ran — skipping.');
+      return;
+    }
+
+    // ── 2. Read + validate data.json ──────────────────────────────────────
+    // Throw (not return) so the process exits non-zero and the Zerops
+    // readiness check fails visibly instead of starting with no content.
     let data;
     try {
       data = JSON.parse(await readFile(DATA_PATH, 'utf8'));
     } catch (err) {
-      log.error({ err, path: DATA_PATH }, 'Could not read data/data.json — skipping seed.');
-      return;
+      throw new Error(`Seed failed: could not read ${DATA_PATH} — ${err.message}`);
     }
 
+    // Warn about unrecognised keys so stale data.json sections are visible.
+    for (const key of Object.keys(data)) {
+      if (!KNOWN_KEYS.has(key)) {
+        log.warn({ key }, 'data.json contains unknown key — it will be ignored. Add it to COLLECTIONS or the known-keys allowlist.');
+      }
+    }
+
+    // ── 3. Seed files ─────────────────────────────────────────────────────
+    // Files must be uploaded before content rows that reference them.
+    // Track newly uploaded IDs separately for S3 compensation on failure.
+    const fileIds    = {};   // key → UUID (all files, new + pre-existing)
+    const newFileIds = [];   // UUIDs uploaded in this run — compensation targets
+
+    if (Array.isArray(data.files) && data.files.length > 0) {
+      let schema;
+      try {
+        schema = await getSchema();
+      } catch (err) {
+        throw new Error(`Seed failed: could not load Directus schema — ${err.message}`);
+      }
+
+      for (const fileDef of data.files) {
+        const { id, isNew } = await seedFile(fileDef, {
+          FilesService: services.FilesService,
+          database,
+          schema,
+          logger: log,
+        });
+        fileIds[fileDef.key] = id;
+        if (isNew && id) newFileIds.push(id);
+      }
+    }
+
+    // ── 4. Seed admin profile ─────────────────────────────────────────────
+    // UPDATE (not INSERT) — patch only when avatar is still null so user
+    // edits made in the Data Studio are never overwritten on restart.
+    // Only fields in ADMIN_PATCHABLE_FIELDS are written; all others ignored.
+    if (data.admin) {
+      try {
+        const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@example.com';
+        const adminUser  = await database('directus_users')
+          .select('id', 'avatar')
+          .where({ email: adminEmail })
+          .first();
+
+        if (adminUser && !adminUser.avatar) {
+          const patch = {};
+          for (const field of ADMIN_PATCHABLE_FIELDS) {
+            if (!(field in data.admin)) continue;
+            const value = data.admin[field];
+            if (field === 'avatar') {
+              if (value && fileIds[value]) patch.avatar = fileIds[value];
+            } else if (field === 'tags') {
+              if (Array.isArray(value)) patch.tags = JSON.stringify(value);
+            } else {
+              patch[field] = value;
+            }
+          }
+          if (Object.keys(patch).length > 0) {
+            await database('directus_users').where({ id: adminUser.id }).update(patch);
+            log.info({ email: adminEmail }, 'Seeded admin user profile.');
+          }
+        } else if (adminUser?.avatar) {
+          log.debug({ email: process.env.ADMIN_EMAIL }, 'Admin profile already set — skipping.');
+        } else {
+          log.warn({ email: process.env.ADMIN_EMAIL }, 'Admin user not found — skipping profile seed.');
+        }
+      } catch (err) {
+        log.error({ err }, 'Admin profile seed failed.');
+      }
+    }
+
+    // ── 5. Seed collections + record completion (one transaction) ─────────
+    // seed_runs INSERT is inside the same transaction as the content inserts.
+    // If any collection insert fails the whole transaction rolls back and
+    // seed_version is NOT recorded — the next restart will retry from scratch.
     try {
       await database.transaction(async (trx) => {
         for (const collection of COLLECTIONS) {
           const rows = data[collection];
           if (!Array.isArray(rows) || rows.length === 0) continue;
 
-          // Guard against the "collection deleted via Data Studio" case. We
-          // can detect the missing table cheaply, but cannot recreate it from
-          // here — see the file-level comment for the recovery procedure.
           const hasTable = await trx.schema.hasTable(collection);
           if (!hasTable) {
             log.warn(
               { collection },
-              'Table is missing — likely deleted via the Data Studio. Restore with `docker compose down -v && up -d`, or `directus schema apply` once the container is up.',
+              'Table is missing — likely deleted via the Data Studio. Run `directus schema apply --yes ./database/snapshot.yaml` to recover.',
             );
             continue;
           }
 
-          // Skip when the collection already has any rows. The auto-heal path
-          // only refills empty tables; intentional data is never overwritten.
           const exists = await trx(collection).select(trx.raw('1')).limit(1).first();
           if (exists) {
             log.debug({ collection }, 'Already populated — skipping seed.');
             continue;
           }
 
-          const prepared = await serialiseJsonColumns(trx, collection, rows);
+          // Resolve file key strings (e.g. "cover-directus") → actual UUIDs.
+          const resolved = rows.map((row) => {
+            const out = { ...row };
+            for (const [field, value] of Object.entries(out)) {
+              if (typeof value === 'string' && value in fileIds) {
+                out[field] = fileIds[value];
+              }
+            }
+            return out;
+          });
+
+          const prepared = await serialiseJsonColumns(trx, collection, resolved);
           await trx(collection).insert(prepared);
           log.info({ collection, count: rows.length }, 'Seeded demo content.');
         }
+
+        // Mark this version as complete — atomically with the content inserts.
+        await trx('seed_runs').insert({ seed_version: seedVersion, ran_at: trx.fn.now() });
+
+        // ── 5b. Seed Insights dashboard ─────────────────────────────────
+        // directus_dashboards and directus_panels are system tables that
+        // always exist after bootstrap. A dashboard seeded here appears in
+        // Insights immediately — no manual creation needed.
+        if (data.dashboard) {
+          const dash = data.dashboard;
+          const dashExists = await trx('directus_dashboards').where({ id: dash.id }).first();
+          if (!dashExists) {
+            // Attribute the dashboard to the admin user when resolvable.
+            const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@example.com';
+            const adminUser  = await trx('directus_users').select('id').where({ email: adminEmail }).first();
+            const userId     = adminUser?.id ?? null;
+
+            await trx('directus_dashboards').insert({
+              id:           dash.id,
+              name:         dash.name,
+              icon:         dash.icon  ?? 'space_dashboard',
+              note:         dash.note  ?? null,
+              color:        dash.color ?? null,
+              date_created: trx.fn.now(),
+              user_created: userId,
+            });
+
+            const panels = (dash.panels ?? []).map((p) => ({
+              id:          p.id,
+              dashboard:   dash.id,
+              name:        p.name        ?? null,
+              icon:        p.icon        ?? null,
+              color:       p.color       ?? null,
+              show_header: p.show_header ?? false,
+              note:        p.note        ?? null,
+              type:        p.type,
+              position_x:  p.position_x,
+              position_y:  p.position_y,
+              width:       p.width,
+              height:      p.height,
+              // options is a JSONB column — must be a JSON string, not a plain object.
+              options:      p.options != null ? JSON.stringify(p.options) : null,
+              date_created: trx.fn.now(),
+              user_created: userId,
+            }));
+
+            if (panels.length > 0) {
+              await trx('directus_panels').insert(panels);
+            }
+
+            log.info({ name: dash.name, panelCount: panels.length }, 'Seeded Insights dashboard.');
+          } else {
+            log.debug({ name: dash.name }, 'Dashboard already exists — skipping.');
+          }
+        }
+
+        log.info({ seedVersion }, 'Seed version recorded in seed_runs.');
       });
     } catch (err) {
-      log.error({ err }, 'Seed transaction rolled back.');
+      log.error({ err }, 'Seed transaction rolled back — seed_version NOT recorded.');
+
+      // Compensate: delete files uploaded in this run to avoid orphaned S3 objects.
+      if (newFileIds.length > 0) {
+        log.warn({ count: newFileIds.length }, 'Attempting S3 compensation — deleting files uploaded this run.');
+        try {
+          const schema = await getSchema();
+          const filesService = new services.FilesService({ knex: database, schema });
+          await filesService.deleteMany(newFileIds);
+          log.info({ count: newFileIds.length }, 'S3 compensation complete.');
+        } catch (compErr) {
+          log.error({ compErr }, 'S3 compensation failed — orphaned files may remain in storage. Delete them manually.');
+        }
+      }
     }
   });
 };

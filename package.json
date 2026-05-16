@@ -18,7 +18,9 @@
     "schema:snapshot": "directus schema snapshot ./database/snapshot.yaml"
   },
   "dependencies": {
-    "directus": "11.17.4",
+    "directus": "11.17.4"
+  },
+  "devDependencies": {
     "@directus/sdk": "21.3.0"
   }
 }

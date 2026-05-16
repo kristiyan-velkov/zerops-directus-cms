@@ -82,3 +82,8 @@ services:
       # Static API token for CI/CD pipelines and automation scripts.
       # Use this instead of a password-based login for programmatic access.
       ADMIN_TOKEN: <@generateRandomString(<40>)>
+
+      # Seed version — the seed hook runs once per unique value of this variable.
+      # Bump to re-seed on the next deploy (e.g. after updating data.json).
+      # Remove or leave empty to disable seeding (recommended for envs with real data).
+      SEED_VERSION: "1.0.0"

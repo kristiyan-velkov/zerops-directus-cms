@@ -40,9 +40,10 @@ After a single Zerops import, you have:
 | S3-compatible object storage | File uploads, image transformations |
 | Mailpit (dev only) | SMTP capture — no real email ever leaves the dev environment |
 | Demo schema | `categories`, `authors`, `posts` collections with full relations |
-| Seeded demo content | 3 categories · 2 authors · 4 posts (3 published, 1 draft) |
-| Admin user | `admin@example.com` with a randomly generated password |
+| Seeded demo content | 3 categories · 2 authors · 4 posts (3 published, 1 draft) · 8 files with metadata |
+| Admin user | `admin@example.com` with avatar, title, location, description, and tags |
 | API token | Randomly generated `ADMIN_TOKEN` for CI/CD and automation |
+| Insights dashboard | "Content Overview" with 5 metric panels pre-built in Directus Insights |
 
 <!-- IMAGE PLACEHOLDER
   Description: Zerops project dashboard screenshot showing all 5 services (directus, db, cache, storage, mailpit) in the running state with green status indicators.
@@ -124,8 +125,9 @@ Every arrow is an **internal Zerops network** connection — no traffic leaves Z
 ```
 zerops-directus-cms/
 ├── data/
-│   ├── data.json                            ← raw demo content
-│   └── uploads/                             ← placeholder for seeded uploads
+│   ├── data.json                            ← seed content (categories, authors, posts, dashboard)
+│   ├── images/                              ← post cover images and author avatars
+│   └── uploads/                             ← site-wide assets (cover image)
 │
 ├── database/
 │   └── snapshot.yaml                        ← Directus schema definition
@@ -346,21 +348,40 @@ Directus issue [#25500](https://github.com/directus/directus/issues/25500) docum
 **What the hook does on every boot:**
 
 ```
-For each collection in [categories, authors, posts]:
-  1. knex.schema.hasTable(collection)
-     └── false → log WARN "table missing", skip
-         (this covers the "someone deleted the whole collection" case)
+0. If SEED_VERSION env var is not set → skip entirely
+   (production safety: operators opt in by setting the variable)
 
-  2. SELECT 1 LIMIT 1
-     └── row found → log DEBUG "already populated", skip
-         (normal warm restart — ~1 ms per collection)
+1. Check seed_runs table for this SEED_VERSION
+   └── found → log INFO "already ran", skip
+   └── not found → proceed
 
-  3. INSERT all rows from data/data.json (in a transaction)
-     └── JSON columns (e.g. posts.tags) are JSON.stringify'd before insert
-     └── log INFO "Seeded N rows"
+2. Upload seed files via FilesService (idempotent per filename_download)
+   └── Each file carries title, description, and tags
+   └── Returns a key → UUID map used to resolve file references in content rows
+
+3. Patch admin user profile (avatar, title, location, description, tags)
+   └── Only patches when avatar is still null — never overwrites user edits
+
+4. Single database transaction:
+   ├── For each collection in [categories, authors, posts]:
+   │    ├── knex.schema.hasTable() → false: log WARN, skip
+   │    ├── SELECT 1 LIMIT 1     → row found: log DEBUG, skip
+   │    └── INSERT rows from data/data.json (JSON columns pre-serialised)
+   ├── INSERT dashboard + panels into directus_dashboards / directus_panels
+   └── INSERT seed_version into seed_runs   ← atomically marks seed complete
 ```
 
-**Performance:** ~5 ms on warm restarts (3 × `SELECT 1`), ~50 ms on first seed (Knex direct, no HTTP round-trips).
+If the transaction rolls back, `seed_version` is NOT recorded — the next restart retries from scratch. Files uploaded before the failed transaction are deleted (S3 compensation) to avoid orphaned objects.
+
+**SEED_VERSION control:**
+
+| `SEED_VERSION` | Behaviour |
+|---|---|
+| Not set | Hook skips — safe default for production envs with real data |
+| Already in `seed_runs` | Hook skips — content already seeded |
+| New value | Full seed runs on next container start |
+
+**Performance:** ~5 ms on warm restarts (one `seed_runs` lookup), ~300 ms on first seed including 8 file uploads (Knex direct, no HTTP round-trips).
 
 ### Extension manifest
 
@@ -383,8 +404,8 @@ Directus 11 auto-discovers any folder under `EXTENSIONS_PATH` (default: `./exten
 
 | What happened | How to restore |
 |---|---|
-| Rows deleted in the Data Studio | `docker compose restart directus` (locally) or restart the service in Zerops GUI — hook refills empty tables |
-| Whole collection deleted via the UI | `docker compose down -v && docker compose up -d` (locally) or full redeploy on Zerops — required because of a known Directus schema-cache bug ([#22674](https://github.com/directus/directus/issues/22674)) where `schema apply` silently no-ops after a UI-driven collection delete |
+| Rows deleted in the Data Studio | Bump `SEED_VERSION` + `docker compose down -v && docker compose up -d` |
+| Whole collection deleted via the UI | `docker compose down -v && docker compose up -d` — required because of a known Directus schema-cache bug ([#22674](https://github.com/directus/directus/issues/22674)) where `schema apply` silently no-ops after a UI-driven collection delete |
 
 ---
 
@@ -470,8 +491,9 @@ Open the Mailpit web UI (port `8025`) via the service's subdomain in the Zerops 
 Add these environment variables to the `directus` service in the Zerops GUI after deploy:
 
 ```
-DIRECTUS_SMTP_HOST      smtp.sendgrid.net       # or your provider
-DIRECTUS_SMTP_PORT      587
+EMAIL_TRANSPORT         smtp
+EMAIL_SMTP_HOST         smtp.sendgrid.net       # or your provider
+EMAIL_SMTP_PORT         587
 DIRECTUS_EMAIL_FROM     no-reply@yourdomain.com
 ```
 
@@ -617,7 +639,7 @@ In the Data Studio → **User Directory** → **Administrator** — update the e
 
 **6. (Production only) Configure SMTP**
 
-Add `DIRECTUS_SMTP_HOST`, `DIRECTUS_SMTP_PORT`, `DIRECTUS_EMAIL_FROM`, `EMAIL_SMTP_USER`, and `EMAIL_SMTP_PASSWORD` to the service environment variables.
+Add `EMAIL_TRANSPORT`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, and `DIRECTUS_EMAIL_FROM` to the service environment variables. Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as secrets.
 
 **7. (Production only) Set up database backups**
 
