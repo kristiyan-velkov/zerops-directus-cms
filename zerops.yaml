@@ -116,6 +116,44 @@ zerops:
           port: 8055
           path: /server/health
 
+  # ── directus ──────────────────────────────────────────────────────────────
+  # Hostname-matched alias for the production setup. Zerops defaults to looking
+  # up the setup by service hostname when `zeropsSetup` is not set on the service.
+  # Projects imported without `zeropsSetup: prod` will hit this setup instead of `prod`.
+  - setup: directus
+    extends: base
+
+    build:
+      base: nodejs@22
+      buildCommands:
+        - npm ci --omit=dev
+      deployFiles:
+        - node_modules
+        - package.json
+        - package-lock.json
+        - data
+        - database
+        - extensions
+      cache: node_modules
+
+    deploy:
+      readinessCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
+    run:
+      initCommands:
+        - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
+        - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
+
+      start: node_modules/.bin/directus start
+
+      healthCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
   # ── dev ───────────────────────────────────────────────────────────────────
   # Development setup. Referenced in recipes/directus/0 — Development/import.yaml
   # via `zeropsSetup: dev`. Extends base for all env variables.
