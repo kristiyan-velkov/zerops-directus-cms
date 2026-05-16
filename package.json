@@ -11,6 +11,12 @@
   "engines": {
     "node": ">=22"
   },
+  "scripts": {
+    "start": "directus start",
+    "bootstrap": "directus bootstrap",
+    "schema:apply": "directus schema apply --yes ./database/snapshot.yaml",
+    "schema:snapshot": "directus schema snapshot ./database/snapshot.yaml"
+  },
   "dependencies": {
     "directus": "11.17.4",
     "@directus/sdk": "21.3.0"

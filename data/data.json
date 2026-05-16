@@ -1,0 +1,88 @@
+{
+  "categories": [
+    {
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "name": "Technology",
+      "slug": "technology",
+      "sort": 1
+    },
+    {
+      "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "name": "DevOps",
+      "slug": "devops",
+      "sort": 2
+    },
+    {
+      "id": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+      "name": "Tutorials",
+      "slug": "tutorials",
+      "sort": 3
+    }
+  ],
+  "authors": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Alex Petrov",
+      "email": "alex.petrov@example.com",
+      "bio": "Senior backend engineer focused on cloud-native infrastructure. Writes about PostgreSQL performance, container orchestration, and developer experience on Zerops.",
+      "sort": 1
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Maria Chen",
+      "email": "maria.chen@example.com",
+      "bio": "Full-stack developer and open-source contributor. Passionate about headless CMS architecture, API design, and making deployments reproducible.",
+      "sort": 2
+    }
+  ],
+  "posts": [
+    {
+      "id": "8f14e45f-ceea-467a-a866-4e82e7b75eee",
+      "status": "published",
+      "title": "Getting Started with Directus on Zerops",
+      "slug": "getting-started-directus-zerops",
+      "excerpt": "A step-by-step guide to deploying Directus — with PostgreSQL, Valkey, and S3-compatible object storage — on Zerops in under 10 minutes.",
+      "content": "## What You'll Build\n\nThis guide walks you through deploying a production-ready Directus instance on Zerops. By the end you'll have:\n\n- Directus 11 running on Node.js 22\n- PostgreSQL 16 as the primary datastore (HA in production)\n- Valkey 7.2 for cache and pub/sub synchronisation across containers\n- Zerops object storage for file uploads (S3-compatible)\n- Mailpit for local email testing\n\n## Architecture\n\n```\nBrowser / API clients\n        ↓\n  Directus (Node 22)   ← minContainers=2 in production\n    ├── PostgreSQL 16  ← HA mode, 3 replicas\n    ├── Valkey 7.2     ← HA mode, cache + pub/sub\n    ├── Object Storage ← S3-compatible, persistent\n    └── Mailpit        ← dev only, SMTP sink\n```\n\n## One-Click Deploy\n\nClick **Deploy to Zerops** in the README. Zerops provisions every service, generates all secrets, and runs bootstrap + schema apply automatically.",
+      "category_id": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+      "author_id": "550e8400-e29b-41d4-a716-446655440000",
+      "tags": ["zerops", "directus", "deployment", "getting-started"],
+      "date_published": "2024-01-15T09:00:00Z"
+    },
+    {
+      "id": "110e8400-e29b-41d4-a716-446655440002",
+      "status": "published",
+      "title": "Why We Chose Valkey Over Redis",
+      "slug": "valkey-vs-redis",
+      "excerpt": "Valkey is a fully open-source, Redis-compatible fork maintained by the Linux Foundation. Here is why it is the right choice for Zerops deployments.",
+      "content": "## Background\n\nIn March 2024 Redis Ltd. changed the Redis licence from BSD to SSPL. The open-source community responded by forking Redis 7.2 into **Valkey**, now hosted under the Linux Foundation.\n\n## Why Valkey on Zerops\n\n- **Drop-in compatible** — same protocol, same commands, same client libraries\n- **Truly open source** — BSD-3 licence, no commercial restrictions\n- **Actively maintained** — backed by AWS, Google, Oracle, Ericsson and others\n- **Exact version match** — Zerops runs Valkey 7.2\n\n## Migration\n\nIf you already use `ioredis` or `redis`, no code changes are needed. Just point `REDIS_HOST` at the Valkey service hostname.\n\n```yaml\nREDIS_HOST: ${cache_hostname}\nREDIS_PORT: \"6379\"\nSYNCHRONIZATION_STORE: redis   # Directus env key, works with Valkey\n```",
+      "category_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "author_id": "550e8400-e29b-41d4-a716-446655440001",
+      "tags": ["valkey", "redis", "cache", "open-source"],
+      "date_published": "2024-02-03T11:30:00Z"
+    },
+    {
+      "id": "110e8400-e29b-41d4-a716-446655440003",
+      "status": "published",
+      "title": "Object Storage Deep Dive: S3 on Zerops",
+      "slug": "object-storage-s3-zerops",
+      "excerpt": "How Directus file uploads are routed to Zerops object storage, why path-style URLs matter, and how MinIO mirrors the same API locally.",
+      "content": "## How It Works\n\nDirectus abstracts file storage behind a driver interface. Setting `STORAGE_LOCATIONS=s3` routes all uploads through the AWS S3 SDK. Zerops object storage exposes the same S3-compatible REST API — no custom code needed.\n\n## Key Configuration\n\n```dotenv\nSTORAGE_LOCATIONS=s3\nSTORAGE_S3_KEY=${storage_accessKeyId}\nSTORAGE_S3_SECRET=${storage_secretAccessKey}\nSTORAGE_S3_BUCKET=${storage_bucketName}\nSTORAGE_S3_ENDPOINT=${storage_apiUrl}\nSTORAGE_S3_FORCE_PATH_STYLE=true\nSTORAGE_S3_ACL=public-read\n```\n\n## Path-Style vs Virtual-Hosted-Style\n\nBy default the AWS SDK constructs URLs like `bucket.endpoint/key`. Custom S3 endpoints expect `endpoint/bucket/key`. Always set `FORCE_PATH_STYLE=true` with a custom endpoint.",
+      "category_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "author_id": "550e8400-e29b-41d4-a716-446655440000",
+      "tags": ["s3", "object-storage", "minio", "files"],
+      "date_published": "2024-03-10T14:00:00Z"
+    },
+    {
+      "id": "110e8400-e29b-41d4-a716-446655440004",
+      "status": "draft",
+      "title": "High-Availability PostgreSQL on Zerops (Coming Soon)",
+      "slug": "ha-postgres-zerops",
+      "excerpt": "A look at how Zerops provisions a 3-node PostgreSQL 16 cluster with automatic failover and how Directus handles reconnections.",
+      "content": "## Status: Draft\n\nThis post is still being written. Check back soon.\n\n## Topics to Cover\n\n- HA mode vs NON_HA: when to use each\n- How Zerops manages primary election and replica sync\n- Connection pool settings for HA clusters\n- Testing failover without data loss\n- Backup strategy",
+      "category_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "author_id": "550e8400-e29b-41d4-a716-446655440001",
+      "tags": ["postgresql", "ha", "database", "scaling"],
+      "date_published": null
+    }
+  ]
+}

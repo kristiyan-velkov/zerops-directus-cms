@@ -9,6 +9,8 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
 
 &nbsp;
 
+<!-- #ZEROPS_EXTRACT_START:maintenance-guide# -->
+
 # Takeover and Maintenance Guide
 
 &nbsp;
@@ -46,9 +48,22 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
    ```
 2. Push the change, or trigger a re-deploy from the Zerops GUI:  
    **Pipelines & CI/CD Settings** → **Trigger a new pipeline** → **Prefill from active deploy**.
-3. The `directus bootstrap` initCommand automatically applies new database migrations during the rolling restart.
+3. The `directus bootstrap` initCommand (wrapped in `zsc execOnce`) automatically applies new database migrations during the rolling restart.
 
-> **Zero-downtime upgrades:** With `minContainers=2`, Zerops performs a rolling update — new containers pass the readiness check before old ones are terminated.
+> **Zero-downtime upgrades:** With `minContainers=2`, Zerops performs a rolling update — new containers pass the readiness check before old ones are terminated. Because every init step uses `zsc execOnce "<key>-$ZEROPS_appVersionId"`, only the first new container migrates; the rest see a no-op and start instantly.
+
+&nbsp;
+
+## What runs on every Production deploy
+
+The single `setup: directus` in `zerops.yaml` runs two idempotent `zsc execOnce` steps before `directus start`:
+
+1. `directus bootstrap` — system tables + first admin user
+2. `directus schema apply --yes ./database/snapshot.yaml` — `categories`, `authors`, `posts` collections
+
+Once `directus start` is listening, the `extensions/directus-extension-seed-demo` extension fires on `server.start` and inserts the demo content (3 categories, 2 authors, 4 posts) via Knex-direct `INSERT`.
+
+> The hook only writes to **empty** tables — existing production content is never overwritten on redeploys. If you want production to start with no demo content at all, delete `extensions/directus-extension-seed-demo/` (or just `extensions/directus-extension-seed-demo/index.js`) on the production branch before deploying. Without the hook present, `data/data.json` is unused.
 
 &nbsp;
 
@@ -66,3 +81,6 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
 - **File uploads:** Object storage is durable by design. For additional redundancy, consider setting up cross-region replication if your plan supports it.
 
 &nbsp;
+
+<!-- #ZEROPS_EXTRACT_END:maintenance-guide# -->
+

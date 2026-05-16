@@ -1,8 +1,12 @@
 # Directus Recipe
 
 &nbsp;
+
+<!-- #ZEROPS_EXTRACT_START:intro# -->
 Basic example of running [Directus](https://directus.io) on [Zerops](https://zerops.io).
 Cloud-ready open-source headless CMS and data platform using PostgreSQL, Valkey (Redis-compatible) cache, and S3-compatible object storage.
+<!-- #ZEROPS_EXTRACT_END:intro# -->
+
 &nbsp;
 
 ⬇️ **Full recipe page and deploy with one-click**

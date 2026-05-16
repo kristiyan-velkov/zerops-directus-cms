@@ -40,37 +40,75 @@ Browser / API clients
 | `db` | PostgreSQL 16 | NON_HA | HA (3-node cluster) |
 | `cache` | Valkey 7.2 | NON_HA | HA |
 | `storage` | Object Storage | 10 GB | 50 GB |
-| `mail` | Mailpit | ✓ included | ✗ use real SMTP |
+| `mailpit` | Mailpit | ✓ included | ✗ use real SMTP |
+
+&nbsp;
+
+## Repository layout
+
+```
+.
+├── data/
+│   ├── data.json                       ← raw demo content (categories, authors, posts)
+│   └── uploads/                        ← placeholder for future image seeds
+├── database/
+│   └── snapshot.yaml                   ← Directus schema snapshot (collections, fields, relations)
+├── extensions/
+│   └── directus-extension-seed-demo/   ← auto-healing demo content seeder
+│       ├── index.js                    ← server.start hook; Knex-direct insert into empty tables
+│       └── package.json                ← Directus extension manifest
+├── recipes/directus/
+│   ├── 0 — Development/import.yaml     ← Development environment (NON_HA services, Mailpit)
+│   └── 1 — Production/import.yaml      ← Production environment (HA services, 2–6 containers)
+├── docker-compose.yml                  ← local stack with full Zerops parity
+├── package.json
+└── zerops.yaml                         ← single `setup: directus` (initCommands + healthCheck)
+```
+
+> Layout follows the official [`zerops-recipe-apps/strapi-app`](https://github.com/zerops-recipe-apps/strapi-app) convention so the recipe is immediately familiar to anyone who has worked with other Zerops headless-CMS recipes.
 
 &nbsp;
 
 ## Deployment flow
 
-Every time a container starts, `initCommands` runs this sequence automatically:
+A single `setup: directus` in `zerops.yaml` drives every environment. Two `initCommands` run before the HTTP server starts, each wrapped in `zsc execOnce` so multi-container deploys execute exactly once. Demo content is then seeded by a Directus extension hook the first time the server reaches `server.start`:
+
+| Step | Command / hook | Idempotent via |
+|------|----------------|----------------|
+| 1 | `directus bootstrap` | `Database already initialized, skipping install` |
+| 2 | `directus schema apply --yes ./database/snapshot.yaml` | Directus diff engine — only applies the delta |
+| 3 | `directus start` (foreground) | — |
+| 4 | `extensions/directus-extension-seed-demo` fires on `server.start` | `knex.schema.hasTable()` + `SELECT 1 LIMIT 1` per collection |
 
 ```
 1. directus bootstrap
-   └── Creates all Directus system tables (idempotent — skips if already done)
+   └── Creates all Directus system tables
    └── Creates the first admin user from ADMIN_EMAIL + ADMIN_PASSWORD
 
-2. directus schema apply --yes ./extensions/snapshot.yaml
+2. directus schema apply --yes ./database/snapshot.yaml
    └── Creates collections: categories, authors, posts
    └── Creates all fields, relationships, and display settings
    └── Idempotent — already-existing schema is skipped via Directus diff engine
 
-3. sh extensions/seed-runner.sh
-   └── Starts a temporary Directus server in the background
-   └── Waits until /server/health returns "ok"
-   └── Calls seed.js via the REST API using ADMIN_TOKEN
-        └── Inserts 3 categories, 2 authors, 4 demo posts
-        └── Idempotent — skips collections that already have data
-   └── Shuts down the temporary server
+3. directus start
+   └── Launches the HTTP server on port 8055
 
-4. directus start
-   └── Launches the production HTTP server on port 8055
+4. extensions/directus-extension-seed-demo (fires on every server.start)
+   └── For each of categories, authors, posts:
+        ├── If the table is missing → log a warning, skip
+        ├── If the table already has any rows → skip silently
+        └── Otherwise → Knex-direct INSERT of the rows from data/data.json
+   └── Auto-heals deleted rows on the next container restart
 ```
 
-> On subsequent deploys steps 1–3 are all no-ops (milliseconds). Only new migrations or schema changes are ever applied.
+**Why an extension hook instead of a one-shot migration?** The Directus migration system records "done" exactly once in `directus_migrations`, which is correct for schema changes but wrong for a *seed*: if anyone deletes rows in the Data Studio, a migration-based seeder leaves the table empty forever. The hook is the same speed (~50 ms cold seed, ~5 ms when populated — Knex direct, no HTTP, no `/auth/login`, no `/server/health` polling) but refills empty tables on the next restart.
+
+**Recovery: deleted rows vs deleted collections.**
+
+| What you deleted in the Data Studio | How to restore |
+|---|---|
+| **Rows** inside a collection | `docker compose restart directus` — the hook detects the empty table and refills it |
+| **A whole collection** | `docker compose down -v && docker compose up -d` — wipes the Postgres + Valkey volumes so `bootstrap` + `schema apply` rebuild from scratch. The Valkey reset is required because of a known Directus schema-cache bug ([directus#22674](https://github.com/directus/directus/issues/22674)) where `schema apply` silently no-ops after a UI-driven collection delete |
 
 &nbsp;
 
@@ -110,7 +148,6 @@ All other environment variables are declared in `zerops.yaml` under `envVariable
 | `TELEMETRY` | `"false"` | Disables anonymous usage stats |
 | `SYNCHRONIZATION_STORE` | `redis` | Enables Valkey-backed sync across containers |
 | `STORAGE_S3_FORCE_PATH_STYLE` | `"true"` | Required for custom S3 endpoints (Zerops / MinIO) |
-| `EXTENSIONS_PATH` | `./extensions` | Where Directus looks for snapshot and seed files |
 
 &nbsp;
 
@@ -238,9 +275,9 @@ If you extend the schema (new collections, fields, relations):
 1. Make the changes in your local Directus Data Studio.
 2. Export a new snapshot:
    ```bash
-   docker compose exec directus node cli.js schema snapshot /directus/extensions/snapshot.yaml
+   docker compose exec directus node cli.js schema snapshot /directus/database/snapshot.yaml
    ```
-3. Commit `extensions/snapshot.yaml`.
+3. Commit `database/snapshot.yaml`.
 4. Push — on next deploy `schema apply` will diff and apply only the new changes.
 
 &nbsp;

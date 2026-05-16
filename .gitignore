@@ -1,23 +1,76 @@
-# Dependencies
+# ── Dependencies ─────────────────────────────────────────────────────────────
 node_modules/
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/install-state.gz
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Environment files — never commit secrets
+# ── Environment files — never commit secrets ─────────────────────────────────
 .env
 .env.*
 !.env.example
 
-# OS artefacts
-.DS_Store
-Thumbs.db
+# ── Build / cache / coverage ─────────────────────────────────────────────────
+dist/
+build/
+out/
+.cache/
+.parcel-cache/
+.turbo/
+.eslintcache
+*.tsbuildinfo
+coverage/
+.nyc_output/
 
-# Editor directories
+# ── Directus runtime artefacts ───────────────────────────────────────────────
+uploads/
+.directus/
+
+# ── Docker Compose local overrides & volumes ─────────────────────────────────
+docker-compose.override.yml
+docker-compose.override.yaml
+.docker/
+volumes/
+
+# ── AI / assistant tooling ───────────────────────────────────────────────────
+.cursor/
+.cursorignore
+.claude/
+.aider*
+.codeium/
+.continue/
+.github/copilot/
+
+# ── Editor directories ───────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
+*.swn
+*~
 
-# Docker Compose local overrides
-docker-compose.override.yml
+# ── OS artefacts ─────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Local / personal scratch ─────────────────────────────────────────────────
+*.local
+.tmp/
+tmp/

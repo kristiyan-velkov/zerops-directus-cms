@@ -1,6 +1,6 @@
 # Directus schema snapshot — generated from local dev stack
-# Apply with:  directus schema apply --yes ./extensions/snapshot.yaml
-# Re-export:   directus schema snapshot ./extensions/snapshot.yaml
+# Apply with:  directus schema apply --yes ./database/snapshot.yaml
+# Re-export:   directus schema snapshot ./database/snapshot.yaml
 #
 # Collections: categories · authors · posts
 # Relations:   posts.category_id → categories.id

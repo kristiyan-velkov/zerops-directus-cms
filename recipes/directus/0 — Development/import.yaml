@@ -1,4 +1,6 @@
 # zeropsPreprocessor=on
+# yaml-language-server: $schema=https://api.app-prg1.zerops.io/api/rest/public/settings/import-project-yaml-json-schema.json
+
 project:
   name: directus-development
 
@@ -38,7 +40,10 @@ services:
   # to Mailpit instead of a real mail server — safe for development.
   # Open the Mailpit web UI (port 8025) via the service subdomain to inspect
   # captured messages.
-  - hostname: mail
+  # The setup name in zerops-recipe-apps/mailpit-app is `mailpit`, so the
+  # service hostname MUST match — otherwise Zerops emits
+  # "The setup was not found. {name: [mail]}" at deploy time.
+  - hostname: mailpit
     type: alpine@3.21
     buildFromGit: https://github.com/zerops-recipe-apps/mailpit-app
     enableSubdomainAccess: true
@@ -51,6 +56,10 @@ services:
   - hostname: directus
     type: nodejs@22
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
+    # zerops.yaml contains a single `setup: directus` block whose initCommands
+    # run bootstrap → schema apply. Demo content is then seeded by the
+    # `extensions/directus-extension-seed-demo` extension hook on every `server.start`,
+    # so deleted rows auto-recover on the next container restart.
     enableSubdomainAccess: true
     minContainers: 1
     maxContainers: 1

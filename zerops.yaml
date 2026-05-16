@@ -1,9 +1,12 @@
+# yaml-language-server: $schema=https://api.app-prg1.zerops.io/api/rest/public/settings/zerops-yaml-json-schema.json
+
+# Single-setup design. Both Development and Production import.yaml files refer
+# to this same `setup: directus` block — production-specific differences
+# (HA database, multiple containers, real SMTP) are expressed in the recipe
+# import files via service config and environment variables, NOT by forking
+# the zerops.yaml.
+
 zerops:
-  # Single setup used by both Development and Production environments.
-  # Environment-specific secrets (SECRET, ADMIN_PASSWORD, ADMIN_TOKEN) are
-  # injected from each environment's import.yaml via 'envSecrets'.
-  # Service-reference variables (DB_HOST, REDIS_HOST, etc.) are resolved
-  # at runtime by Zerops' built-in env-var interpolation system.
   - setup: directus
 
     build:
@@ -11,22 +14,24 @@ zerops:
       buildCommands:
         # npm ci installs the exact dependency tree from package-lock.json —
         # reproducible, faster than npm install, and fails on lockfile drift.
-        # '--omit=dev' keeps the deploy artifact lean and attack surface minimal.
+        # `--omit=dev` keeps the deploy artifact lean and the attack surface
+        # minimal.
         - npm ci --omit=dev
 
       deployFiles:
-        # The entire node_modules directory is deployed so the runtime
-        # container does not need to perform any npm install steps.
         - node_modules
         - package.json
         - package-lock.json
-        # Custom extensions directory — contains:
-        #   snapshot.yaml  schema snapshot applied by 'directus schema apply'
-        #   seed.js        demo data seeder called via 'node extensions/seed.js'
+        # Strapi-style layout (see github.com/zerops-recipe-apps/strapi-app):
+        #   data/                       raw seed input (data.json + uploads/)
+        #   database/snapshot.yaml      schema applied by `directus schema apply`
+        #   extensions/directus-extension-seed-demo  auto-healing demo content seeder (ESM hook)
+        - data
+        - database
         - extensions
 
-      # Persist node_modules between builds so npm install only fetches
-      # new or changed packages, significantly speeding up subsequent deploys.
+      # Persist node_modules between builds so npm ci only fetches new or
+      # changed packages, significantly speeding up subsequent deploys.
       cache: node_modules
 
     deploy:
@@ -36,63 +41,51 @@ zerops:
           # Directus exposes a structured health endpoint that reports the
           # status of the app, database connection, and storage provider.
           path: /server/health
-        # Allow up to 3 minutes for the server to pass the readiness check.
-        # Note: initCommands (bootstrap → schema apply → seed-runner.sh) run
-        # BEFORE 'start', so this timeout only covers the actual server startup
-        # time — which is fast once all migrations and seeding are complete.
-        failureTimeout: 180
-        retryPeriod: 5
+        # initCommands (bootstrap → schema apply) run BEFORE
+        # 'start', so this timeout only covers the actual server boot — which
+        # is fast (<5 s) once the data layer is already prepared.
+        failureTimeout: 120
+        retryPeriod: 3
 
     run:
       base: nodejs@22
 
-      envVariables:
-        # ── Directus Core ────────────────────────────────────────────────────
-        # Path where Directus discovers the extensions directory.
-        # Must match the directory deployed via deployFiles above.
-        # Contains snapshot.yaml (schema) and seed.js (demo data) — both applied
-        # automatically during initCommands via 'schema apply' and seed-runner.sh.
-        EXTENSIONS_PATH: ./extensions
+      ports:
+        - port: 8055
+          httpSupport: true
 
-        # Directus is licensed under BSL 1.1. Setting ACCEPT_TERMS=true
-        # is required to acknowledge and accept the licence on startup.
-        # Without it, the process will refuse to start.
-        # See: https://directus.io/license
+      envVariables:
+        # ── Directus Core ─────────────────────────────────────────────────────
+        # Directus is licensed under BSL 1.1. Setting ACCEPT_TERMS=true is
+        # required to acknowledge the licence on startup — without it the
+        # process refuses to start. See https://directus.io/license
         ACCEPT_TERMS: "true"
 
-        # Opt out of anonymous usage statistics sent to the Directus team.
+        # Opt out of anonymous usage statistics.
         TELEMETRY: "false"
 
-        # The canonical public URL of this Directus instance.
-        # Used for: OAuth redirect URIs, password-reset links, file URLs in
-        # email notifications, and CORS origin checks.
-        # ⚠️  IMPORTANT: Update this value after the first deploy once your
-        # Zerops subdomain URL is known (e.g. https://<app>.<project>.zerops.app).
-        # Until it is set, OAuth flows and email links will contain an empty host.
+        # Canonical public URL — used for OAuth redirect URIs, password-reset
+        # links, file URLs in email notifications, and CORS checks.
+        # ⚠️  Update this after the first deploy once your Zerops subdomain
+        # is known (e.g. https://<app>.<project>.zerops.app).
         PUBLIC_URL: ""
 
-        # Default admin email — changeable after first deploy.
-        # Together with ADMIN_PASSWORD (set as a secret in import.yaml),
-        # this seeds the first administrator account during 'directus bootstrap'.
+        # Default admin email — changeable after first deploy. Together with
+        # ADMIN_PASSWORD (set as a secret in import.yaml), seeds the first
+        # administrator account during `directus bootstrap`.
         ADMIN_EMAIL: admin@example.com
 
-        # ── Database (PostgreSQL) ─────────────────────────────────────────────
-        # Directus requires the 'pg' (node-postgres) driver for PostgreSQL.
+        # ── Database (PostgreSQL) ────────────────────────────────────────────
         DB_CLIENT: pg
-
-        # Zerops injects ${db_hostname} automatically once the PostgreSQL
-        # service named 'db' is created in the same project.
         DB_HOST: ${db_hostname}
         DB_PORT: "5432"
-
-        # By Zerops convention the default database name equals the service
-        # hostname, so DB_DATABASE and DB_HOST share the same value.
+        # By Zerops convention the database name equals the service hostname,
+        # so DB_DATABASE and DB_HOST share the same value.
         DB_DATABASE: ${db_hostname}
         DB_USER: ${db_user}
         DB_PASSWORD: ${db_password}
-
-        # Connection pool: min=2 keeps warm connections ready for burst traffic;
-        # max=10 prevents exhausting the database under heavy concurrent load.
+        # Connection pool: min=2 keeps warm connections ready for burst
+        # traffic; max=10 prevents exhausting the database under heavy load.
         DB_POOL__MIN: "2"
         DB_POOL__MAX: "10"
 
@@ -101,107 +94,60 @@ zerops:
         REDIS_PORT: "6379"
 
         # SYNCHRONIZATION_STORE=redis is mandatory in multi-container (HA)
-        # deployments. Directus uses it to broadcast schema cache invalidations,
-        # rate-limit counters, and auth-token blacklists across all running
-        # containers. Without it, each container maintains its own in-process
-        # state, which causes stale-cache bugs and split-brain auth issues.
+        # deployments. Directus uses it to broadcast schema cache
+        # invalidations, rate-limit counters, and auth-token blacklists across
+        # all running containers. Harmless in single-container dev.
         SYNCHRONIZATION_STORE: redis
 
-        # Enable the shared HTTP response cache backed by Valkey.
-        # Without this, each container keeps its own in-process cache; with it
-        # all containers share one cache store and invalidations are instant.
+        # Externalised HTTP response cache — every container shares one cache
+        # store via Valkey, so invalidations are instant and consistent.
         CACHE_ENABLED: "true"
         CACHE_STORE: redis
 
-        # ── Object Storage (S3-compatible) ────────────────────────────────────
-        # Zerops object-storage is exposed as an S3-compatible API.
-        # STORAGE_LOCATIONS=s3 tells Directus to use S3 as the sole storage
-        # driver for all file uploads.
+        # ── Object Storage (S3-compatible) ───────────────────────────────────
         STORAGE_LOCATIONS: s3
         STORAGE_S3_DRIVER: s3
-
-        # Credentials and bucket details are injected from the Zerops
-        # object-storage service env vars (prefix: storage_).
         STORAGE_S3_KEY: ${storage_accessKeyId}
         STORAGE_S3_SECRET: ${storage_secretAccessKey}
         STORAGE_S3_BUCKET: ${storage_bucketName}
-
-        # Custom S3 endpoint pointing at the Zerops object-storage API.
         STORAGE_S3_ENDPOINT: ${storage_apiUrl}
-
-        # The Zerops S3 implementation is region-agnostic.
-        # 'us-east-1' satisfies the AWS SDK region requirement without
-        # affecting any routing or behavior.
+        # Zerops S3 is region-agnostic; us-east-1 just satisfies the AWS SDK
+        # region requirement.
         STORAGE_S3_REGION: us-east-1
-
-        # Path-style URLs are required when using a custom S3 endpoint.
-        # Virtual-hosted-style (the default) would prefix the bucket name to
-        # the hostname (bucket.host), which the Zerops object-storage API
-        # does not support. Path-style keeps the bucket name in the URL path
-        # (/bucket/key), which is what the Zerops API expects.
+        # Path-style is mandatory for custom S3 endpoints (Zerops, MinIO).
+        # Virtual-hosted-style would put the bucket in the hostname, which
+        # the Zerops endpoint does not support.
         STORAGE_S3_FORCE_PATH_STYLE: "true"
-
-        # Make uploaded files publicly readable without requiring signed URLs.
-        # Required for serving images in the Directus Data Studio and via
-        # the /assets endpoint without authentication.
+        # public-read serves /assets without signed URLs (required for image
+        # previews in the Data Studio).
         STORAGE_S3_ACL: public-read
 
-        # ── Email (SMTP) ──────────────────────────────────────────────────────
-        # Development: pre-wired to the Mailpit SMTP sink service.
-        #   Mailpit captures all outbound email — no real messages are sent.
-        #   Open the Mailpit web UI (port 8025) to inspect captured emails.
-        #
-        # Production: override these variables via the Zerops GUI or by adding
-        #   envVariables in your import YAML before deploying:
-        #     DIRECTUS_SMTP_HOST: smtp.sendgrid.net
-        #     DIRECTUS_SMTP_PORT: 587
-        #     DIRECTUS_SMTP_USER: apikey
-        #     DIRECTUS_SMTP_PASSWORD: <your-sendgrid-api-key>
-        #     DIRECTUS_EMAIL_FROM: no-reply@yourdomain.com
-        #   Then set EMAIL_SMTP_SECURE=true if your provider requires TLS.
+        # ── Email (SMTP) ─────────────────────────────────────────────────────
+        # Development: defaults route to the Mailpit SMTP sink service.
+        # Production: override DIRECTUS_SMTP_HOST / DIRECTUS_SMTP_PORT /
+        # DIRECTUS_EMAIL_FROM in the Zerops GUI to use a real provider.
         EMAIL_TRANSPORT: smtp
         EMAIL_SMTP_HOST: ${DIRECTUS_SMTP_HOST:-mailpit}
         EMAIL_SMTP_PORT: ${DIRECTUS_SMTP_PORT:-1025}
         EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@directus.local}
 
-      ports:
-        - port: 8055
-          httpSupport: true
-
+      # Run-time data setup. Order matters:
+      #   1. bootstrap        creates system tables + admin user (no-op on
+      #                       redeploy thanks to the "Database already
+      #                       initialized" check)
+      #   2. schema apply     creates / diffs content collections from
+      #                       database/snapshot.yaml
+      #
+      # Demo content is seeded by the `extensions/directus-extension-seed-demo/` extension
+      # hook on every `server.start` event — auto-healing if rows are deleted
+      # via the Data Studio. No third initCommand needed.
+      #
+      # zsc execOnce ensures only one container per deploy runs each step in
+      # a multi-container HA setup; the rest skip straight to `start`.
+      # See https://docs.zerops.io/references/zsc#execonce
       initCommands:
-        # Step 1 — System bootstrap (idempotent, safe on every container start).
-        #
-        # What it does on FIRST run:
-        #   1. Connects to the database and creates all Directus system tables.
-        #   2. Applies Directus built-in migrations.
-        #   3. Creates the first admin user (ADMIN_EMAIL + ADMIN_PASSWORD).
-        #
-        # What it does on SUBSEQUENT runs:
-        #   - System tables already exist → no-op, exits in milliseconds.
-        #
-        # Distributed-lock safety: Directus uses an advisory lock in PostgreSQL so
-        # that when multiple containers start simultaneously (scale-out), only one
-        # runs migrations while the others wait — no duplicate schema changes.
-        - node_modules/.bin/directus bootstrap
-
-        # Step 2 — Schema apply (idempotent via Directus diff engine).
-        #
-        # Applies the schema snapshot at extensions/snapshot.yaml, which defines
-        # the categories, authors, and posts collections with all fields and
-        # relations. Uses Directus's own schema diffing — safer and more reliable
-        # than raw Knex migrations. Already-existing schema changes are skipped.
-        - node_modules/.bin/directus schema apply --yes ./extensions/snapshot.yaml
-
-        # Step 3 — Seed demo data via REST API (idempotent).
-        #
-        # seed-runner.sh starts a temporary Directus server in the background,
-        # waits until /server/health returns "ok", then calls seed.js which uses
-        # Node 22's built-in fetch + ADMIN_TOKEN to insert categories, authors,
-        # and posts via the Directus REST API. No external dependencies required.
-        # Collections that already have data are skipped — safe on every redeploy.
-        # The temporary server is killed once seeding finishes; the real server
-        # starts via the 'start' command below.
-        - sh extensions/seed-runner.sh
+        - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
+        - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
 
       start: node_modules/.bin/directus start
 

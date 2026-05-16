@@ -1,0 +1,13 @@
+{
+  "name": "directus-extension-seed-demo",
+  "version": "1.0.0",
+  "description": "Auto-healing demo content seeder for the zerops-directus-cms recipe. Refills categories/authors/posts when their tables are empty.",
+  "type": "module",
+  "private": true,
+  "directus:extension": {
+    "type": "hook",
+    "path": "index.js",
+    "source": "index.js",
+    "host": "^11.0.0"
+  }
+}
