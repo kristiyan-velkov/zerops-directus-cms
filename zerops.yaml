@@ -100,8 +100,6 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
-        failureTimeout: 120s
-        retryPeriod: 5s
 
     run:
       # zsc execOnce: only the first container per deploy runs each command.
@@ -180,8 +178,6 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
-        failureTimeout: 120s
-        retryPeriod: 5s
 
     run:
       envVariables:
