@@ -46,6 +46,16 @@ zerops:
         SYNCHRONIZATION_STORE: redis
         CACHE_ENABLED: "true"
         CACHE_STORE: redis
+        # Without this, cached API responses are never invalidated on writes —
+        # a PATCH/DELETE on container A leaves container B returning stale 304s.
+        # CACHE_AUTO_PURGE broadcasts a purge event through SYNCHRONIZATION_STORE
+        # so all containers drop their cached entries for the affected collection.
+        CACHE_AUTO_PURGE: "true"
+        # Directus admin UI sends `Cache-Control: no-cache` (not `no-store`).
+        # Without this flag the studio ignores that header and serves stale data
+        # even with CACHE_AUTO_PURGE enabled. Workaround for directus/directus#26278
+        # (open as of Directus 11.17, fix PR #26659 was closed without merging).
+        CACHE_SKIP_ALLOWED: "true"
 
         # ── Object Storage (S3-compatible) ───────────────────────────────────
         STORAGE_LOCATIONS: s3
