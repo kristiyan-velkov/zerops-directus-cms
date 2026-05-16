@@ -1,6 +1,6 @@
 # Zerops × Directus
 
-![Zerops × Directus](docs/images/cover-directus.webp)
+![Zerops × Directus](data/images/cover-directus.webp)
 
 [Directus](https://directus.io) is an open-source headless CMS and data platform that wraps any SQL database with a powerful REST & GraphQL API, a rich Data Studio UI, and a flexible roles & permissions system. This recipe deploys a fully production-ready Directus instance on [Zerops](https://zerops.io) with zero manual setup.
 
@@ -83,7 +83,7 @@ A single `zerops.yaml` drives every environment via four setups (`base`, `prod`,
 | 1    | `directus bootstrap`                                              | `Database already initialized, skipping install`             |
 | 2    | `directus schema apply --yes ./database/snapshot.yaml`            | Directus diff engine — only applies the delta                |
 | 3    | `directus start` (foreground)                                     | —                                                            |
-| 4    | `extensions/directus-extension-seed-demo` fires on `server.start` | `knex.schema.hasTable()` + `SELECT 1 LIMIT 1` per collection |
+| 4    | `extensions/directus-extension-seed-demo` fires on `server.start` | `seed_runs` table keyed on `SEED_VERSION` env var            |
 
 ```
 1. directus bootstrap
@@ -98,22 +98,33 @@ A single `zerops.yaml` drives every environment via four setups (`base`, `prod`,
 3. directus start
    └── Launches the HTTP server on port 8055
 
-4. extensions/directus-extension-seed-demo (fires on every server.start)
-   └── For each of categories, authors, posts:
-        ├── If the table is missing → log a warning, skip
-        ├── If the table already has any rows → skip silently
-        └── Otherwise → Knex-direct INSERT of the rows from data/data.json
-   └── Auto-heals deleted rows on the next container restart
+4. extensions/directus-extension-seed-demo (fires on server.start)
+   ├── Skips entirely if SEED_VERSION is not set (production safety guard)
+   ├── Skips entirely if this SEED_VERSION is already recorded in seed_runs
+   ├── Uploads seed images to object storage via FilesService (idempotent per filename)
+   ├── Patches the admin user profile (avatar, title, location, description, tags)
+   └── In one transaction:
+        ├── For each collection: INSERT rows from data/data.json if table is empty
+        ├── Inserts the Insights dashboard and panels into directus_dashboards / directus_panels
+        └── Records SEED_VERSION in seed_runs (commit = seed complete)
 ```
 
-**Why an extension hook instead of a one-shot migration?** The Directus migration system records "done" exactly once in `directus_migrations`, which is correct for schema changes but wrong for a _seed_: if anyone deletes rows in the Data Studio, a migration-based seeder leaves the table empty forever. The hook is the same speed (~50 ms cold seed, ~5 ms when populated — Knex direct, no HTTP, no `/auth/login`, no `/server/health` polling) but refills empty tables on the next restart.
+**Why an extension hook instead of a one-shot migration?** The Directus migration system records "done" exactly once in `directus_migrations`, which is correct for schema changes but wrong for a _seed_: if anyone deletes rows in the Data Studio, a migration-based seeder leaves the table empty forever. The hook checks a `seed_runs` table keyed on `SEED_VERSION` — bump the version to re-seed on the next deploy without touching schema migrations.
+
+**SEED_VERSION control:**
+
+| `SEED_VERSION` value | Behaviour |
+| -------------------- | --------- |
+| Not set (unset)      | Hook skips — safe default for production envs with real data |
+| `"1.0.0"` (already in `seed_runs`) | Hook skips — content already seeded |
+| `"1.0.1"` (new value) | Hook runs the full seed on next container start |
 
 **Recovery: deleted rows vs deleted collections.**
 
-| What you deleted in the Data Studio | How to restore                                                                                                                                                                                                                                                                                                                                                        |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Rows** inside a collection        | `docker compose restart directus` — the hook detects the empty table and refills it                                                                                                                                                                                                                                                                                   |
-| **A whole collection**              | `docker compose down -v && docker compose up -d` — wipes the Postgres + Valkey volumes so `bootstrap` + `schema apply` rebuild from scratch. The Valkey reset is required because of a known Directus schema-cache bug ([directus#22674](https://github.com/directus/directus/issues/22674)) where `schema apply` silently no-ops after a UI-driven collection delete |
+| What you deleted | How to restore |
+| ---------------- | -------------- |
+| **Rows** inside a collection | Bump `SEED_VERSION` + `docker compose down -v && docker compose up -d` |
+| **A whole collection** | `docker compose down -v && docker compose up -d` — wipes Postgres + Valkey so `bootstrap` + `schema apply` rebuild from scratch. Valkey reset required due to Directus schema-cache bug ([directus#22674](https://github.com/directus/directus/issues/22674)) |
 
 &nbsp;
 
@@ -123,7 +134,7 @@ The seed creates a fully populated CMS on first deploy:
 
 **Categories:** Technology · DevOps · Tutorials
 
-**Authors:** Alex Petrov · Maria Chen
+**Authors:** Alex Petrov · Maria Chen (each with avatar, bio, email)
 
 **Posts (3 published, 1 draft):**
 | Title | Status | Category |
@@ -132,6 +143,12 @@ The seed creates a fully populated CMS on first deploy:
 | Why We Chose Valkey Over Redis | published | Technology |
 | Object Storage Deep Dive: S3 on Zerops | published | DevOps |
 | High-Availability PostgreSQL on Zerops | draft | DevOps |
+
+**Files (uploaded to object storage):** cover image, 4 post cover images, 3 author avatars — each with title, description, and tags.
+
+**Admin profile:** avatar, title, location, description, and tags patched on the `admin@example.com` user.
+
+**Insights dashboard:** "Content Overview" with 5 metric panels — All Posts, Published, Drafts, Authors, Categories.
 
 &nbsp;
 

@@ -2,7 +2,7 @@
   "files": [
     {
       "key": "cover-directus",
-      "path": "uploads/cover-directus.webp",
+      "path": "images/cover-directus.webp",
       "title": "Zerops × Directus Cover",
       "type": "image/webp",
       "description": "Hero cover image for the Zerops × Directus recipe — PostgreSQL, Valkey, S3, and Mailpit wired together.",
@@ -34,7 +34,7 @@
     },
     {
       "key": "post-postgres-ha",
-      "path": "images/post-3-postgress-sql-ha.webp",
+      "path": "images/post-3-postgres-sql-ha.webp",
       "title": "High-Availability PostgreSQL on Zerops",
       "type": "image/webp",
       "description": "How Zerops provisions a 3-node PostgreSQL 16 cluster with automatic failover and how Directus handles reconnections.",
