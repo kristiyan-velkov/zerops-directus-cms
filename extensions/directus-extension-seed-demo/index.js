@@ -167,7 +167,10 @@ export default ({ action }, { database, logger, services, getSchema }) => {
       return;
     }
 
-    // ── 1. Run-once check ────────────────────────────────────────────────
+    // ── 1. Run-once fast-path ────────────────────────────────────────────
+    // Non-atomic SELECT — just avoids opening a transaction on warm restarts
+    // where the seed has already completed. The real race safety is the
+    // atomic INSERT inside the transaction below (step 5).
     await ensureSeedRunsTable(database);
     const alreadyRan = await database('seed_runs').where({ seed_version: seedVersion }).first();
     if (alreadyRan) {
@@ -258,22 +261,47 @@ export default ({ action }, { database, logger, services, getSchema }) => {
     }
 
     // ── 5. Seed collections + record completion (one transaction) ─────────
-    // seed_runs INSERT is inside the same transaction as the content inserts.
-    // If any collection insert fails the whole transaction rolls back and
-    // seed_version is NOT recorded — the next restart will retry from scratch.
+    // seed_runs is INSERT-ed as the VERY FIRST statement in the transaction
+    // using ON CONFLICT DO NOTHING. This is the atomic distributed lock:
+    // whichever container wins the INSERT owns the seed; the other detects
+    // the empty RETURNING result and exits cleanly — no window between check
+    // and act, no duplicate seeding, no race condition.
+    //
+    // If any collection table is missing (schema apply not yet complete),
+    // we THROW — rolling back the entire transaction including the seed_runs
+    // claim. The version is NOT recorded, so the next container restart
+    // retries from scratch instead of silently completing with empty tables.
     try {
       await database.transaction(async (trx) => {
+
+        // Atomic distributed lock — whoever inserts first wins the seed.
+        // ON CONFLICT DO NOTHING returns 0 rows when another container
+        // already inserted this version; `claimed` will be undefined.
+        const [claimed] = await trx('seed_runs')
+          .insert({ seed_version: seedVersion, ran_at: trx.fn.now() })
+          .onConflict('seed_version')
+          .ignore()
+          .returning('seed_version');
+
+        if (!claimed) {
+          log.info({ seedVersion }, 'Another container claimed this seed version — skipping.');
+          return;
+        }
+
         for (const collection of COLLECTIONS) {
           const rows = data[collection];
           if (!Array.isArray(rows) || rows.length === 0) continue;
 
           const hasTable = await trx.schema.hasTable(collection);
           if (!hasTable) {
-            log.warn(
-              { collection },
-              'Table is missing — likely deleted via the Data Studio. Run `directus schema apply --yes ./database/snapshot.yaml` to recover.',
+            // Throw rolls back the entire transaction, including the
+            // seed_runs claim above. The version is NOT recorded so the
+            // next restart retries rather than marking the seed "done"
+            // with empty collections.
+            throw new Error(
+              `Collection table '${collection}' not found — schema apply may not have completed yet. ` +
+              `Rolling back seed_runs claim; will retry on next restart.`,
             );
-            continue;
           }
 
           const exists = await trx(collection).select(trx.raw('1')).limit(1).first();
@@ -297,9 +325,6 @@ export default ({ action }, { database, logger, services, getSchema }) => {
           await trx(collection).insert(prepared);
           log.info({ collection, count: rows.length }, 'Seeded demo content.');
         }
-
-        // Mark this version as complete — atomically with the content inserts.
-        await trx('seed_runs').insert({ seed_version: seedVersion, ran_at: trx.fn.now() });
 
         // ── 5b. Seed Insights dashboard ─────────────────────────────────
         // directus_dashboards and directus_panels are system tables that
@@ -353,7 +378,7 @@ export default ({ action }, { database, logger, services, getSchema }) => {
           }
         }
 
-        log.info({ seedVersion }, 'Seed version recorded in seed_runs.');
+        log.info({ seedVersion }, 'Seed complete — version claimed and all content inserted.');
       });
     } catch (err) {
       log.error({ err }, 'Seed transaction rolled back — seed_version NOT recorded.');
