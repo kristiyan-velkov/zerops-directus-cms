@@ -1,5 +1,7 @@
 # Zerops × Directus
 
+![Zerops × Directus](docs/images/cover-directus.png)
+
 [Directus](https://directus.io) is an open-source headless CMS and data platform that wraps any SQL database with a powerful REST & GraphQL API, a rich Data Studio UI, and a flexible roles & permissions system. This recipe deploys a fully production-ready Directus instance on [Zerops](https://zerops.io) with zero manual setup.
 
 [![Deploy on Zerops](https://github.com/zeropsio/recipe-shared-assets/blob/main/deploy-button/green/deploy-button.svg)](https://app.zerops.io/recipe/directus)

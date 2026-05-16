@@ -55,12 +55,13 @@ services:
   - hostname: directus
     type: nodejs@22
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
-    # zerops.yaml contains a single `setup: directus` block whose initCommands
-    # run bootstrap → schema apply. Demo content is then seeded by the
-    # `extensions/directus-extension-seed-demo` extension hook on `server.start` — it only
-    # inserts into empty tables, so existing production content is never
-    # overwritten on redeploys. If you don't want demo content in production
-    # at all, delete `extensions/directus-extension-seed-demo/` on the production branch.
+    # `zeropsSetup: prod` selects the `setup: prod` block from zerops.yaml.
+    # It extends `setup: base` (shared env variables) and adds the production-specific
+    # build and initCommands. Demo content is seeded by the
+    # `extensions/directus-extension-seed-demo` hook — only into empty tables,
+    # so existing production content is never overwritten on redeploys.
+    # To skip demo content entirely, delete `extensions/directus-extension-seed-demo/`.
+    zeropsSetup: prod
     enableSubdomainAccess: true
     minContainers: 2
     maxContainers: 6

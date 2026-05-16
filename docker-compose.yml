@@ -5,7 +5,7 @@
 #   ──────────────────────────────────────────────────────────────────────────
 #   db       → postgres:16-alpine                  postgresql@16
 #   cache    → valkey/valkey:7.2.13-alpine         valkey@7.2        ← exact same version
-#   storage  → minio/minio:RELEASE.2025-09-07T16-13-09Z  object-storage  ← same S3-compatible API
+#   storage  → cgr.dev/chainguard/minio            object-storage    ← CVE-free Chainguard build
 #   mailpit  → axllent/mailpit:v1.29.7              mailpit-app (alpine@3.21 + mailpit binary)
 #   directus → directus/directus:11.17.4           nodejs@22 + npm directus@^11
 #
@@ -21,73 +21,115 @@
 #   open http://localhost:8025   # Mailpit web UI
 #   open http://localhost:9001   # MinIO Console (minioadmin / minioadmin123)
 
+name: directus-local
+
+networks:
+  # backend: shared by all data services and Directus.
+  backend:
+    driver: bridge
+  # mail: only Directus and Mailpit — keeps SMTP sink off the data network.
+  mail:
+    driver: bridge
+
 services:
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-directus}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-directus_secret}
       POSTGRES_DB: ${DB_DATABASE:-directus}
+      # PGDATA moves the data directory one level deeper so the mount point
+      # itself is a directory Postgres controls — avoids "lost+found" errors
+      # on ext4 volumes.
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5432:5432"
+      # Bind to localhost only — prevents other hosts on the LAN from
+      # reaching the dev database.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Dev-speed optimisations: disable fsync and WAL flushing.
+    # Safe for local dev — DO NOT use in production.
+    command: postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-directus} -d ${DB_DATABASE:-directus}"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
+    networks:
+      - backend
 
   # ── Valkey 7.2 cache ──────────────────────────────────────────────────────
   # Exact same major.minor as Zerops valkey@7.2 — ensures identical behaviour
   # for SYNCHRONIZATION_STORE, pub/sub, and key expiry semantics.
   cache:
     image: valkey/valkey:7.2.13-alpine
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+    # Disable persistence for local dev — all data lives in RAM, fastest possible.
+    # Safe to lose on container stop; the seed hook refills content on restart.
+    command: valkey-server --save "" --appendonly no
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
+    networks:
+      - backend
 
   # ── MinIO S3-compatible object storage ────────────────────────────────────
+  # cgr.dev/chainguard/minio is the CVE-free, daily-patched drop-in replacement
+  # for the community minio/minio image (removed from Docker Hub Oct 2025).
+  # Same binary, same API, same env vars — only the image registry differs.
   storage:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${STORAGE_S3_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${STORAGE_S3_SECRET:-minioadmin123}
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # MinIO Console UI
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "9001:9001"              # MinIO Console UI (kept on all interfaces for browser access)
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # mc is bundled in the Chainguard minio image — no curl dependency needed.
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 15s
+    networks:
+      - backend
 
   # ── MinIO bucket initialiser ───────────────────────────────────────────────
   # Runs once to create the bucket and set it to public-read.
   # This mirrors the Zerops object-storage 'objectStoragePolicy: public-read' setting.
   createbuckets:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: cgr.dev/chainguard/minio-client:latest
+    restart: "no"
     depends_on:
       storage:
-        condition: service_healthy
+        # service_started (not service_healthy) so Directus bootstrap begins
+        # in parallel with bucket creation — shaves ~10 s off first boot.
+        condition: service_started
     entrypoint: >
-      /bin/sh -c "
-      /usr/bin/mc alias set local http://storage:9000 ${STORAGE_S3_KEY:-minioadmin} ${STORAGE_S3_SECRET:-minioadmin123};
+      /usr/bin/bash -c "
+      until /usr/bin/mc alias set local http://storage:9000 ${STORAGE_S3_KEY:-minioadmin} ${STORAGE_S3_SECRET:-minioadmin123}; do sleep 1; done;
       /usr/bin/mc mb local/${STORAGE_S3_BUCKET:-directus-local} --ignore-existing;
       /usr/bin/mc anonymous set public local/${STORAGE_S3_BUCKET:-directus-local};
       echo 'Bucket ${STORAGE_S3_BUCKET:-directus-local} is ready (public-read).';
-      exit 0;
       "
+    networks:
+      - backend
 
   # ── Mailpit SMTP sink ─────────────────────────────────────────────────────
   # Captures all outbound email. Open http://localhost:8025 to inspect messages.
@@ -95,9 +137,12 @@ services:
   # resolves identically in both local and Zerops environments.
   mailpit:
     image: axllent/mailpit:v1.29.7
+    restart: unless-stopped
     ports:
       - "8025:8025"   # Web UI
       - "1025:1025"   # SMTP
+    networks:
+      - mail
 
   # ── Directus 11.17.4 ──────────────────────────────────────────────────────
   # Pinned to the exact latest stable release — matches the directus@^11 in
@@ -116,13 +161,14 @@ services:
   # ~50 ms on first seed.
   directus:
     image: directus/directus:11.17.4
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
       cache:
         condition: service_healthy
       createbuckets:
-        condition: service_completed_successfully
+        condition: service_started
       mailpit:
         condition: service_started
     ports:
@@ -144,6 +190,9 @@ services:
         node cli.js schema apply --yes /directus/database/snapshot.yaml &&
         exec node cli.js start
       "
+    networks:
+      - backend
+      - mail
 
 volumes:
   postgres_data:
