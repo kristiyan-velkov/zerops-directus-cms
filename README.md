@@ -1,6 +1,6 @@
 # Zerops × Directus
 
-![Zerops × Directus](docs/images/cover-directus.png)
+![Zerops × Directus](docs/images/cover-directus.webp)
 
 [Directus](https://directus.io) is an open-source headless CMS and data platform that wraps any SQL database with a powerful REST & GraphQL API, a rich Data Studio UI, and a flexible roles & permissions system. This recipe deploys a fully production-ready Directus instance on [Zerops](https://zerops.io) with zero manual setup.
 
@@ -11,7 +11,9 @@
 ---
 
 <!-- #ZEROPS_EXTRACT_START:intro# -->
+
 Zerops recipe for [Directus](https://directus.io) — a production-ready headless CMS running on Node.js 22 with PostgreSQL 16, Valkey 7.2 (Redis-compatible) cache, S3-compatible object storage, and Mailpit for email. Ships with a pre-built demo schema (categories, authors, posts) and seeded content so the CMS is fully usable immediately after deploy.
+
 <!-- #ZEROPS_EXTRACT_END:intro# -->
 
 &nbsp;
@@ -36,13 +38,13 @@ Browser / API clients
 
 ## Services
 
-| Service | Type | Dev | Production |
-|---------|------|-----|------------|
-| `directus` | Node.js 22 | 1 container | 2–6 containers (autoscale) |
-| `db` | PostgreSQL 16 | NON_HA | HA (3-node cluster) |
-| `cache` | Valkey 7.2 | NON_HA | HA |
-| `storage` | Object Storage | 10 GB | 50 GB |
-| `mailpit` | Mailpit | ✓ included | ✗ use real SMTP |
+| Service    | Type           | Dev         | Production                 |
+| ---------- | -------------- | ----------- | -------------------------- |
+| `directus` | Node.js 22     | 1 container | 2–6 containers (autoscale) |
+| `db`       | PostgreSQL 16  | NON_HA      | HA (3-node cluster)        |
+| `cache`    | Valkey 7.2     | NON_HA      | HA                         |
+| `storage`  | Object Storage | 10 GB       | 50 GB                      |
+| `mailpit`  | Mailpit        | ✓ included  | ✗ use real SMTP            |
 
 &nbsp;
 
@@ -51,8 +53,9 @@ Browser / API clients
 ```
 .
 ├── data/
-│   ├── data.json                       ← raw demo content (categories, authors, posts)
-│   └── uploads/                        ← placeholder for future image seeds
+│   ├── data.json                       ← seed content (categories, authors, posts, dashboard)
+│   ├── images/                         ← post cover images and author avatars
+│   └── uploads/                        ← site-wide assets (cover image)
 ├── database/
 │   └── snapshot.yaml                   ← Directus schema snapshot (collections, fields, relations)
 ├── extensions/
@@ -64,7 +67,7 @@ Browser / API clients
 │   └── 1 — Production/import.yaml      ← Production environment (HA services, 2–6 containers)
 ├── docker-compose.yml                  ← local stack with full Zerops parity
 ├── package.json
-└── zerops.yaml                         ← single `setup: directus` (initCommands + healthCheck)
+└── zerops.yaml                         ← build + run pipeline (`base`, `prod`, `directus`, `dev` setups)
 ```
 
 > Layout follows the official [`zerops-recipe-apps/strapi-app`](https://github.com/zerops-recipe-apps/strapi-app) convention so the recipe is immediately familiar to anyone who has worked with other Zerops headless-CMS recipes.
@@ -73,14 +76,14 @@ Browser / API clients
 
 ## Deployment flow
 
-A single `setup: directus` in `zerops.yaml` drives every environment. Two `initCommands` run before the HTTP server starts, each wrapped in `zsc execOnce` so multi-container deploys execute exactly once. Demo content is then seeded by a Directus extension hook the first time the server reaches `server.start`:
+A single `zerops.yaml` drives every environment via four setups (`base`, `prod`, `directus`, `dev`). Two `initCommands` run before the HTTP server starts, each wrapped in `zsc execOnce` so multi-container deploys execute exactly once. Demo content is then seeded by a Directus extension hook the first time the server reaches `server.start`:
 
-| Step | Command / hook | Idempotent via |
-|------|----------------|----------------|
-| 1 | `directus bootstrap` | `Database already initialized, skipping install` |
-| 2 | `directus schema apply --yes ./database/snapshot.yaml` | Directus diff engine — only applies the delta |
-| 3 | `directus start` (foreground) | — |
-| 4 | `extensions/directus-extension-seed-demo` fires on `server.start` | `knex.schema.hasTable()` + `SELECT 1 LIMIT 1` per collection |
+| Step | Command / hook                                                    | Idempotent via                                               |
+| ---- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
+| 1    | `directus bootstrap`                                              | `Database already initialized, skipping install`             |
+| 2    | `directus schema apply --yes ./database/snapshot.yaml`            | Directus diff engine — only applies the delta                |
+| 3    | `directus start` (foreground)                                     | —                                                            |
+| 4    | `extensions/directus-extension-seed-demo` fires on `server.start` | `knex.schema.hasTable()` + `SELECT 1 LIMIT 1` per collection |
 
 ```
 1. directus bootstrap
@@ -103,14 +106,14 @@ A single `setup: directus` in `zerops.yaml` drives every environment. Two `initC
    └── Auto-heals deleted rows on the next container restart
 ```
 
-**Why an extension hook instead of a one-shot migration?** The Directus migration system records "done" exactly once in `directus_migrations`, which is correct for schema changes but wrong for a *seed*: if anyone deletes rows in the Data Studio, a migration-based seeder leaves the table empty forever. The hook is the same speed (~50 ms cold seed, ~5 ms when populated — Knex direct, no HTTP, no `/auth/login`, no `/server/health` polling) but refills empty tables on the next restart.
+**Why an extension hook instead of a one-shot migration?** The Directus migration system records "done" exactly once in `directus_migrations`, which is correct for schema changes but wrong for a _seed_: if anyone deletes rows in the Data Studio, a migration-based seeder leaves the table empty forever. The hook is the same speed (~50 ms cold seed, ~5 ms when populated — Knex direct, no HTTP, no `/auth/login`, no `/server/health` polling) but refills empty tables on the next restart.
 
 **Recovery: deleted rows vs deleted collections.**
 
-| What you deleted in the Data Studio | How to restore |
-|---|---|
-| **Rows** inside a collection | `docker compose restart directus` — the hook detects the empty table and refills it |
-| **A whole collection** | `docker compose down -v && docker compose up -d` — wipes the Postgres + Valkey volumes so `bootstrap` + `schema apply` rebuild from scratch. The Valkey reset is required because of a known Directus schema-cache bug ([directus#22674](https://github.com/directus/directus/issues/22674)) where `schema apply` silently no-ops after a UI-driven collection delete |
+| What you deleted in the Data Studio | How to restore                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rows** inside a collection        | `docker compose restart directus` — the hook detects the empty table and refills it                                                                                                                                                                                                                                                                                   |
+| **A whole collection**              | `docker compose down -v && docker compose up -d` — wipes the Postgres + Valkey volumes so `bootstrap` + `schema apply` rebuild from scratch. The Valkey reset is required because of a known Directus schema-cache bug ([directus#22674](https://github.com/directus/directus/issues/22674)) where `schema apply` silently no-ops after a UI-driven collection delete |
 
 &nbsp;
 
@@ -136,20 +139,20 @@ The seed creates a fully populated CMS on first deploy:
 
 These secrets are **randomly generated at import time** and never stored in source code:
 
-| Variable | Length | Purpose |
-|----------|--------|---------|
-| `SECRET` | 64 chars | Signs all Directus JWTs and cookies — rotating logs out all users |
-| `ADMIN_PASSWORD` | 20 chars | Initial admin account password |
-| `ADMIN_TOKEN` | 40 chars | Static API token for the seed script, CI/CD, and automation |
+| Variable         | Length   | Purpose                                                           |
+| ---------------- | -------- | ----------------------------------------------------------------- |
+| `SECRET`         | 64 chars | Signs all Directus JWTs and cookies — rotating logs out all users |
+| `ADMIN_PASSWORD` | 20 chars | Initial admin account password                                    |
+| `ADMIN_TOKEN`    | 40 chars | Static API token for the seed script, CI/CD, and automation       |
 
 All other environment variables are declared in `zerops.yaml` under `envVariables`. Key ones:
 
-| Variable | Value | Why |
-|----------|-------|-----|
-| `ACCEPT_TERMS` | `"true"` | Required to acknowledge Directus BSL 1.1 licence |
-| `TELEMETRY` | `"false"` | Disables anonymous usage stats |
-| `SYNCHRONIZATION_STORE` | `redis` | Enables Valkey-backed sync across containers |
-| `STORAGE_S3_FORCE_PATH_STYLE` | `"true"` | Required for custom S3 endpoints (Zerops / MinIO) |
+| Variable                      | Value     | Why                                               |
+| ----------------------------- | --------- | ------------------------------------------------- |
+| `ACCEPT_TERMS`                | `"true"`  | Required to acknowledge Directus BSL 1.1 licence  |
+| `TELEMETRY`                   | `"false"` | Disables anonymous usage stats                    |
+| `SYNCHRONIZATION_STORE`       | `redis`   | Enables Valkey-backed sync across containers      |
+| `STORAGE_S3_FORCE_PATH_STYLE` | `"true"`  | Required for custom S3 endpoints (Zerops / MinIO) |
 
 &nbsp;
 
@@ -206,8 +209,9 @@ STORAGE_S3_ACL=public-read
 **Production** — configure your SMTP provider by adding these env vars in the Zerops GUI:
 
 ```
-DIRECTUS_SMTP_HOST     smtp.sendgrid.net
-DIRECTUS_SMTP_PORT     587
+EMAIL_TRANSPORT        smtp
+EMAIL_SMTP_HOST        smtp.sendgrid.net
+EMAIL_SMTP_PORT        587
 DIRECTUS_EMAIL_FROM    no-reply@yourdomain.com
 ```
 
@@ -232,23 +236,23 @@ cp .env.example .env
 docker compose up -d
 ```
 
-| URL | Service |
-|-----|---------|
-| http://localhost:8055 | Directus Data Studio |
-| http://localhost:8025 | Mailpit web UI |
+| URL                   | Service                                    |
+| --------------------- | ------------------------------------------ |
+| http://localhost:8055 | Directus Data Studio                       |
+| http://localhost:8025 | Mailpit web UI                             |
 | http://localhost:9001 | MinIO Console (minioadmin / minioadmin123) |
 
 Local credentials are in `.env` — see `.env.example` for all options.
 
 **Local service equivalents:**
 
-| Zerops service | Local Docker image |
-|----------------|-------------------|
-| `postgresql@16` | `postgres:16-alpine` |
-| `valkey@7.2` | `valkey/valkey:7.2.13-alpine` |
-| `object-storage` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
-| `mailpit-app` | `axllent/mailpit:v1.29.7` |
-| `nodejs@22` + `directus@11` | `directus/directus:11.17.4` |
+| Zerops service              | Local Docker image                         |
+| --------------------------- | ------------------------------------------ |
+| `postgresql@16`             | `postgres:16-alpine`                       |
+| `valkey@7.2`                | `valkey/valkey:7.2.13-alpine`              |
+| `object-storage`            | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
+| `mailpit-app`               | `axllent/mailpit:v1.29.7`                  |
+| `nodejs@22` + `directus@11` | `directus/directus:11.17.4`                |
 
 &nbsp;
 

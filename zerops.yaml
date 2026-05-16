@@ -87,7 +87,7 @@ zerops:
         - node_modules
         - package.json
         - package-lock.json
-        # data/          — raw seed input (data.json + uploads/)
+        # data/          — seed input (data.json + images/ + uploads/)
         # database/      — snapshot.yaml applied by `directus schema apply`
         # extensions/    — directus-extension-seed-demo auto-healing hook
         - data
@@ -100,6 +100,8 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
+        failureTimeout: 120s
+        retryPeriod: 5s
 
     run:
       # zsc execOnce: only the first container per deploy runs each command.
@@ -178,6 +180,8 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
+        failureTimeout: 120s
+        retryPeriod: 5s
 
     run:
       envVariables:

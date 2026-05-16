@@ -124,8 +124,9 @@ Every arrow is an **internal Zerops network** connection — no traffic leaves Z
 ```
 zerops-directus-cms/
 ├── data/
-│   ├── data.json                            ← raw demo content
-│   └── uploads/                             ← placeholder for seeded uploads
+│   ├── data.json                            ← seed content (categories, authors, posts, dashboard)
+│   ├── images/                              ← post cover images and author avatars
+│   └── uploads/                             ← site-wide assets (cover image)
 │
 ├── database/
 │   └── snapshot.yaml                        ← Directus schema definition
@@ -470,8 +471,9 @@ Open the Mailpit web UI (port `8025`) via the service's subdomain in the Zerops 
 Add these environment variables to the `directus` service in the Zerops GUI after deploy:
 
 ```
-DIRECTUS_SMTP_HOST      smtp.sendgrid.net       # or your provider
-DIRECTUS_SMTP_PORT      587
+EMAIL_TRANSPORT         smtp
+EMAIL_SMTP_HOST         smtp.sendgrid.net       # or your provider
+EMAIL_SMTP_PORT         587
 DIRECTUS_EMAIL_FROM     no-reply@yourdomain.com
 ```
 
@@ -617,7 +619,7 @@ In the Data Studio → **User Directory** → **Administrator** — update the e
 
 **6. (Production only) Configure SMTP**
 
-Add `DIRECTUS_SMTP_HOST`, `DIRECTUS_SMTP_PORT`, `DIRECTUS_EMAIL_FROM`, `EMAIL_SMTP_USER`, and `EMAIL_SMTP_PASSWORD` to the service environment variables.
+Add `EMAIL_TRANSPORT`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, and `DIRECTUS_EMAIL_FROM` to the service environment variables. Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as secrets.
 
 **7. (Production only) Set up database backups**
 

@@ -1,0 +1,118 @@
+[
+	{
+		"name": "Content Overview",
+		"icon": "bar_chart",
+		"note": "Overview of blog content — posts, authors, and categories at a glance.",
+		"color": null,
+		"panels": [
+			{
+				"name": "All Posts",
+				"icon": "article",
+				"color": null,
+				"show_header": true,
+				"note": null,
+				"type": "metric",
+				"position_x": 32,
+				"position_y": 2,
+				"width": 9,
+				"height": 4,
+				"options": {
+					"collection": "posts",
+					"field": "id",
+					"function": "count",
+					"filter": {},
+					"prefix": null,
+					"suffix": " posts"
+				}
+			},
+			{
+				"name": "Published",
+				"icon": "check_circle",
+				"color": null,
+				"show_header": true,
+				"note": null,
+				"type": "metric",
+				"position_x": 42,
+				"position_y": 2,
+				"width": 15,
+				"height": 4,
+				"options": {
+					"collection": "posts",
+					"field": "id",
+					"function": "count",
+					"filter": {
+						"status": {
+							"_eq": "published"
+						}
+					},
+					"prefix": null,
+					"suffix": " published"
+				}
+			},
+			{
+				"name": "Drafts",
+				"icon": "edit_note",
+				"color": null,
+				"show_header": true,
+				"note": null,
+				"type": "metric",
+				"position_x": 58,
+				"position_y": 2,
+				"width": 15,
+				"height": 4,
+				"options": {
+					"collection": "posts",
+					"field": "id",
+					"function": "count",
+					"filter": {
+						"status": {
+							"_eq": "draft"
+						}
+					},
+					"prefix": null,
+					"suffix": " drafts"
+				}
+			},
+			{
+				"name": "Authors",
+				"icon": "people",
+				"color": null,
+				"show_header": true,
+				"note": null,
+				"type": "metric",
+				"position_x": 3,
+				"position_y": 2,
+				"width": 12,
+				"height": 4,
+				"options": {
+					"collection": "authors",
+					"field": "id",
+					"function": "count",
+					"filter": {},
+					"prefix": null,
+					"suffix": " authors"
+				}
+			},
+			{
+				"name": "Categories",
+				"icon": "label",
+				"color": null,
+				"show_header": true,
+				"note": null,
+				"type": "metric",
+				"position_x": 17,
+				"position_y": 2,
+				"width": 13,
+				"height": 4,
+				"options": {
+					"collection": "categories",
+					"field": "id",
+					"function": "count",
+					"filter": {},
+					"prefix": null,
+					"suffix": " categories"
+				}
+			}
+		]
+	}
+]

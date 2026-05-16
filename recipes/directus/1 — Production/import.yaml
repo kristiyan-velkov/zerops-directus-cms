@@ -50,7 +50,7 @@ services:
   # NOTE: Mailpit is intentionally excluded from the production environment.
   # Configure a real SMTP provider by setting environment variables on this
   # service after deploy (see README for instructions):
-  #   DIRECTUS_SMTP_HOST, DIRECTUS_SMTP_PORT, DIRECTUS_EMAIL_FROM
+  #   EMAIL_TRANSPORT, EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, DIRECTUS_EMAIL_FROM
   #   EMAIL_SMTP_USER (secret), EMAIL_SMTP_PASSWORD (secret)
   - hostname: directus
     type: nodejs@22
