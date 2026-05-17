@@ -1,13 +1,16 @@
 # Local development environment for Directus on Zerops
 # Mirrors the production Zerops stack as closely as possible:
 #
-#   SERVICE    LOCAL IMAGE                         ZEROPS EQUIVALENT
-#   ──────────────────────────────────────────────────────────────────────────
-#   db       → postgres:16-alpine                  postgresql@16
-#   cache    → valkey/valkey:7.2.13-alpine         valkey@7.2        ← exact same version
-#   storage  → cgr.dev/chainguard/minio            object-storage    ← CVE-free Chainguard build
-#   mailpit  → axllent/mailpit:v1.29.7              mailpit-app (alpine@3.21 + mailpit binary)
-#   directus → directus/directus:11.17.4           nodejs@22 + npm directus@^11
+#   SERVICE    LOCAL IMAGE                                        ZEROPS EQUIVALENT
+#   ──────────────────────────────────────────────────────────────────────────────────────
+#   db       → postgres:16-alpine                                 postgresql@16
+#   cache    → valkey/valkey:7.2.13-alpine                        valkey@7.2        ← exact same version
+#   storage  → quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z  object-storage    ← quay.io (Docker Hub abandoned)
+#   mailpit  → axllent/mailpit:v1.29.7                            mailpit-app (alpine@3.21 + mailpit binary)
+#   directus → directus/directus:11.17.4                          nodejs@22 + npm directus@^11
+#
+# MinIO note: Docker Hub images (minio/minio) are abandoned and contain unpatched CVEs
+# from RELEASE.2025-04-22T22-12-26Z onward. Use quay.io/minio/minio instead.
 #
 # MinIO vs Zerops object-storage:
 #   Both expose the same S3-compatible REST API (AWS S3 SDK compatible).
@@ -74,10 +77,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    # Disable persistence for local dev — all data lives in RAM, fastest possible.
-    # Safe to lose on container stop; the seed hook refills content on restart.
+    # Persistence disabled — all data lives in RAM for maximum dev speed.
+    # Nothing is written to disk, so no volume is needed.
+    # The seed hook refills content on restart, so data loss is safe.
     command: valkey-server --save "" --appendonly no
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
@@ -89,24 +91,26 @@ services:
       - backend
 
   # ── MinIO S3-compatible object storage ────────────────────────────────────
-  # cgr.dev/chainguard/minio is the CVE-free, daily-patched drop-in replacement
-  # for the community minio/minio image (removed from Docker Hub Oct 2025).
-  # Same binary, same API, same env vars — only the image registry differs.
+  # Using quay.io registry — Docker Hub (minio/minio) is abandoned and contains
+  # unpatched CVEs. quay.io/minio/minio continued receiving releases past September 2025.
+  # Note: quay.io/minio/mc lags behind quay.io/minio/minio on release cadence —
+  # update them independently; they do not need matching tags.
+  # Latest releases: https://quay.io/repository/minio/minio?tab=tags
   storage:
-    image: cgr.dev/chainguard/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${STORAGE_S3_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${STORAGE_S3_SECRET:-minioadmin123}
     ports:
       - "127.0.0.1:9000:9000" # S3 API
-      - "9001:9001" # MinIO Console UI (kept on all interfaces for browser access)
+      - "127.0.0.1:9001:9001" # MinIO Console UI
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
     healthcheck:
-      # mc is bundled in the Chainguard minio image — no curl dependency needed.
-      test: ["CMD", "mc", "ready", "local"]
+      # MinIO exposes a dedicated liveness endpoint — no mc dependency needed.
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -116,18 +120,19 @@ services:
 
   # ── MinIO bucket initialiser ───────────────────────────────────────────────
   # Runs once to create the bucket and set it to public-read.
-  # This mirrors the Zerops object-storage 'objectStoragePolicy: public-read' setting.
+  # Mirrors the Zerops object-storage 'objectStoragePolicy: public-read' setting.
+  # depends_on: service_healthy guarantees MinIO is ready — no retry loop needed.
   createbuckets:
-    image: cgr.dev/chainguard/minio-client:latest
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     restart: "no"
     depends_on:
       storage:
         condition: service_healthy
     entrypoint: >
-      /usr/bin/bash -c "
-      until /usr/bin/mc alias set local http://storage:9000 ${STORAGE_S3_KEY:-minioadmin} ${STORAGE_S3_SECRET:-minioadmin123}; do sleep 1; done;
-      /usr/bin/mc mb local/${STORAGE_S3_BUCKET:-directus-local} --ignore-existing;
-      /usr/bin/mc anonymous set public local/${STORAGE_S3_BUCKET:-directus-local};
+      /bin/sh -c "
+      mc alias set local http://storage:9000 ${STORAGE_S3_KEY:-minioadmin} ${STORAGE_S3_SECRET:-minioadmin123};
+      mc mb local/${STORAGE_S3_BUCKET:-directus-local} --ignore-existing;
+      mc anonymous set public local/${STORAGE_S3_BUCKET:-directus-local};
       echo 'Bucket ${STORAGE_S3_BUCKET:-directus-local} is ready (public-read).';
       "
     networks:
@@ -141,8 +146,8 @@ services:
     image: axllent/mailpit:v1.29.7
     restart: unless-stopped
     ports:
-      - "8025:8025" # Web UI
-      - "1025:1025" # SMTP
+      - "127.0.0.1:8025:8025" # Web UI
+      - "127.0.0.1:1025:1025" # SMTP
     networks:
       - mail
 
@@ -151,16 +156,15 @@ services:
   # package.json. Update both here and in package.json together when upgrading.
   #
   # Startup sequence (command below):
-  #   1. bootstrap        — system tables + admin user (idempotent)
-  #   2. schema apply     — custom collections via Directus diff engine (idempotent)
-  #   3. start (exec)     — foreground HTTP server takes over PID 1
+  #   1. bootstrap           — system tables + admin user (idempotent)
+  #   2. ensure-schema.mjs   — DB-backed guard: only calls schema apply on a
+  #                            fresh database; skips safely on every restart.
+  #   3. start (exec)        — foreground HTTP server takes over PID 1
   #
-  # Demo content is seeded by the `extensions/directus-extension-seed-demo/` extension hook,
-  # which fires on the `server.start` event AFTER `directus start` is listening.
-  # The hook is auto-healing: if rows are deleted via the Data Studio, a simple
-  # `docker compose restart directus` repopulates them. Knex-direct INSERT — no
-  # HTTP, no /auth/login, no /server/health polling. ~5 ms when populated,
-  # ~50 ms on first seed.
+  # Demo content is seeded by the `extensions/directus-extension-seed-demo/`
+  # hook, which fires on `server.start` and records each run in `seed_runs`.
+  # Knex-direct INSERT — no HTTP round-trips. ~5 ms when already seeded,
+  # ~50 ms on first seed. Bump SEED_VERSION to re-run on the next start.
   directus:
     image: directus/directus:11.17.4
     restart: unless-stopped
@@ -174,22 +178,25 @@ services:
       mailpit:
         condition: service_started
     ports:
-      - "8055:8055"
+      - "127.0.0.1:8055:8055"
     volumes:
-      # Mount the Strapi-style layout. In production (Zerops) these folders
-      # are bundled into the build artifact via deployFiles in zerops.yaml.
+      # In production (Zerops) these folders are bundled into the build artifact
+      # via deployFiles in zerops.yaml. Here they are mounted directly.
       - ./data:/directus/data
       - ./database:/directus/database
       # Directus auto-loads any extension under EXTENSIONS_PATH (default
       # /directus/extensions). The seed-demo hook lives at
       # extensions/directus-extension-seed-demo/ and runs on every `server.start`.
       - ./extensions:/directus/extensions
+      # Same guard logic as zerops.yaml initCommands — skips schema apply on
+      # non-empty databases to prevent data loss on restart.
+      - ./scripts:/directus/scripts
     env_file:
       - .env
     command: >
       sh -c "
         node cli.js bootstrap &&
-        node cli.js schema apply --yes /directus/database/snapshot.yaml &&
+        node /directus/scripts/ensure-schema.mjs &&
         exec node cli.js start
       "
     networks:
@@ -198,5 +205,4 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
   minio_data:

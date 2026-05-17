@@ -2,114 +2,188 @@
 
 zerops:
   # ── base ──────────────────────────────────────────────────────────────────
-  # Shared run configuration inherited by both `prod` and `dev` setups via
-  # `extends: base`. Keeps env variables DRY — only the initCommands and
-  # build section differ between environments.
+  # Shared runtime configuration inherited by `dev` and `prod` via `extends`.
   - setup: base
     run:
-      base: nodejs@22
+      base: alpine/nodejs@22
 
       ports:
         - port: 8055
           httpSupport: true
 
       envVariables:
-        # ── Directus Core ───────────────────────────────────────────────────
-        # BSL 1.1 licence acknowledgement — required, process refuses to start without it.
-        ACCEPT_TERMS: "true"
-        # Disable anonymous usage statistics.
-        TELEMETRY: "false"
-        # Set this to your subdomain URL after first deploy (e.g. https://<app>.zerops.app).
-        # Required for OAuth redirect URIs, password-reset links, and CORS.
-        PUBLIC_URL: ""
-        # Initial admin email — change in Data Studio after first login.
-        ADMIN_EMAIL: admin@example.com
+        # PM2 (used internally by zsc execOnce) resolves its home directory from
+        # HOME. Without this, it falls back to /etc/.pm2 which is read-only in
+        # Zerops containers, causing EACCES errors that silently break the
+        # distributed lock mechanism.
+        HOME: /tmp
 
-        # ── Database (PostgreSQL) ────────────────────────────────────────────
+        # ── Directus ────────────────────────────────────────────────────────
+        ACCEPT_TERMS: "true" # Required — Directus refuses to start without BSL 1.1 acknowledgement.
+        TELEMETRY: "false" # Opt out of anonymous usage statistics.
+
+        # SECRET is declared in import.yaml as an envSecret, which Zerops generates
+        # once at import time and injects directly into the container environment —
+        # no reference needed here. It is stable across restarts and consistent
+        # across all HA containers. Rotating it invalidates all active sessions.
+        # Retrieve the value from: service → Environment Variables → Secret Variables.
+        # KEY is not used in Directus 11 (removed; was v9/v10 only).
+
+        # ${zeropsSubdomain} is a Zerops built-in that resolves to this service's
+        # own public subdomain at runtime. No post-deploy configuration needed.
+        # Replace with a custom domain via the Zerops GUI once DNS is configured.
+        PUBLIC_URL: ${zeropsSubdomain}
+
+        ADMIN_EMAIL: admin@example.com # Change in to correct email in Data Studio after first login.
+
+        # ── Database ─────────────────────────────────────────────────────────
         DB_CLIENT: pg
         DB_HOST: ${db_hostname}
         DB_PORT: "5432"
-        # Zerops convention: database name equals the service hostname.
         DB_DATABASE: ${db_hostname}
         DB_USER: ${db_user}
         DB_PASSWORD: ${db_password}
-        # min=2 keeps warm connections ready; max=10 prevents DB exhaustion under load.
+        # With N containers: N×2 idle connections are always open.
+        # Monitor pg max_connections (~100 by default) when scaling beyond 5 containers.
         DB_POOL__MIN: "2"
         DB_POOL__MAX: "10"
 
-        # ── Cache / Pub-Sub (Valkey) ─────────────────────────────────────────
+        # ── Cache & synchronisation (Valkey) ─────────────────────────────────
         REDIS_HOST: ${cache_hostname}
         REDIS_PORT: "6379"
-        # Required for multi-container HA: broadcasts schema cache invalidations,
-        # rate-limit counters, and auth-token blacklists across all containers.
-        # Harmless in single-container dev.
+        # SYNCHRONIZATION_STORE broadcasts schema cache invalidations, rate-limit
+        # counters, and auth-token blacklists across all containers in HA deployments.
+        # Safe and effectively a no-op in single-container dev.
         SYNCHRONIZATION_STORE: redis
         CACHE_ENABLED: "true"
         CACHE_STORE: redis
-        # Without this, cached API responses are never invalidated on writes —
-        # a PATCH/DELETE on container A leaves container B returning stale 304s.
-        # CACHE_AUTO_PURGE broadcasts a purge event through SYNCHRONIZATION_STORE
-        # so all containers drop their cached entries for the affected collection.
+        # Without CACHE_AUTO_PURGE, a write on container A leaves container B
+        # serving stale cached responses until TTL expires.
         CACHE_AUTO_PURGE: "true"
-        # Directus admin UI sends `Cache-Control: no-cache` (not `no-store`).
-        # Without this flag the studio ignores that header and serves stale data
-        # even with CACHE_AUTO_PURGE enabled. Workaround for directus/directus#26278
-        # (open as of Directus 11.17, fix PR #26659 was closed without merging).
+        # The Directus admin UI sends Cache-Control: no-cache (not no-store).
+        # Without this flag the Data Studio ignores that header and displays stale
+        # data. Workaround for directus/directus#26278 (unfixed as of v11.17).
         CACHE_SKIP_ALLOWED: "true"
 
-        # ── Object Storage (S3-compatible) ───────────────────────────────────
+        # ── Object storage (S3-compatible) ───────────────────────────────────
         STORAGE_LOCATIONS: s3
         STORAGE_S3_DRIVER: s3
         STORAGE_S3_KEY: ${storage_accessKeyId}
         STORAGE_S3_SECRET: ${storage_secretAccessKey}
         STORAGE_S3_BUCKET: ${storage_bucketName}
         STORAGE_S3_ENDPOINT: ${storage_apiUrl}
-        # us-east-1 satisfies the AWS SDK requirement; routing is region-agnostic on Zerops.
-        STORAGE_S3_REGION: us-east-1
-        # Path-style required for custom S3 endpoints — bucket name goes in the URL path,
-        # not the hostname (virtual-hosted style is not supported on Zerops / MinIO).
-        STORAGE_S3_FORCE_PATH_STYLE: "true"
-        # public-read serves /assets without signed URLs — required for Data Studio previews.
-        STORAGE_S3_ACL: public-read
+        STORAGE_S3_REGION: us-east-1 # Required by AWS SDK; routing is region-agnostic on Zerops.
+        STORAGE_S3_FORCE_PATH_STYLE: "true" # Zerops object storage uses path-style URLs, not virtual-hosted.
+        STORAGE_S3_ACL: public-read # Required for unauthenticated /assets access and Data Studio previews.
+
+        # ── Rate limiting ────────────────────────────────────────────────────
+        # Protects /auth/login and other write endpoints from brute-force attacks.
+        # Counters are stored in Valkey, so they are consistent across HA containers.
+        RATE_LIMITER_ENABLED: "true"
+        RATE_LIMITER_STORE: redis
+        RATE_LIMITER_POINTS: "50" # Max requests per window per IP.
+        RATE_LIMITER_DURATION: "1" # Window size in seconds.
 
         # ── Email ────────────────────────────────────────────────────────────
-        # Seed version — bump this string to re-run the seeder on the next deploy.
-        # The hook records each version in the `seed_runs` table so it never
-        # runs the same version twice. Set to a non-empty string to enable seeding;
-        # leave empty (or unset) to skip all seeding (useful for bare production branches).
-        SEED_VERSION: "1.0.4"
+        # EMAIL_TRANSPORT is intentionally absent — each environment sets its own
+        # transport: dev routes to Mailpit; prod defaults to Directus sendmail until
+        # a real SMTP provider is configured in the Zerops GUI.
+        # To configure SMTP: add EMAIL_TRANSPORT, EMAIL_SMTP_HOST, EMAIL_SMTP_PORT,
+        # EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, and EMAIL_FROM via the Zerops GUI.
+        #
+        # Uses a separate override variable to avoid self-reference.
+        # Operators set DIRECTUS_EMAIL_FROM in the Zerops GUI to override the default.
+        # example.com is IANA-reserved and avoids SMTP rejection on misconfigured senders.
+        EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@example.com}
 
-        # No email transport is set here intentionally — each environment
-        # defines its own transport (dev overrides to Mailpit below;
-        # production falls back to Directus's default sendmail, which
-        # passes the /server/health check without needing a network connection).
-        # Configure a real SMTP provider in the Zerops GUI by setting:
-        #   EMAIL_TRANSPORT, EMAIL_SMTP_HOST, EMAIL_SMTP_PORT,
-        #   EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, EMAIL_FROM
-        EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@directus.local}
-
-  # ── prod ──────────────────────────────────────────────────────────────────
-  # Production setup. Referenced in recipes/directus/1 — Production/import.yaml
-  # via `zeropsSetup: prod`. Extends base for all env variables.
-  - setup: prod
+  # ── dev ───────────────────────────────────────────────────────────────────
+  # Single-container development environment with Mailpit email capture and
+  # automatic demo content seeding. Inherits all env variables from `base`.
+  - setup: dev
     extends: base
 
     build:
-      base: nodejs@22
+      base: alpine/nodejs@22
       buildCommands:
-        # npm ci = reproducible build from lockfile; --omit=dev keeps the artifact lean.
+        # npm ci installs exactly what is in package-lock.json (reproducible).
+        # ~/.npm caches downloaded tarballs between builds — on a cache hit,
+        # packages are read from disk rather than the registry (~5–10 s vs ~60–90 s).
         - npm ci --omit=dev
       deployFiles:
         - node_modules
         - package.json
         - package-lock.json
-        # data/          — seed input (data.json + images/ + uploads/)
-        # database/      — snapshot.yaml applied by `directus schema apply`
-        # extensions/    — directus-extension-seed-demo auto-healing hook
-        - data
-        - database
-        - extensions
-      cache: node_modules
+        - data # Seed input: data.json, images/, uploads/
+        - database # snapshot.yaml — applied by scripts/ensure-schema.mjs
+        - extensions # directus-extension-seed-demo auto-healing hook
+        - scripts # ensure-schema.mjs conditional schema apply guard
+      cache: ~/.npm
+
+    deploy:
+      readinessCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+        # failureTimeout and retryPeriod are intentionally omitted.
+        # The Zerops runtime rejects integer values (!!int → time.Duration error)
+        # and strips unit suffixes from strings before unmarshaling, causing the
+        # same error. Zerops defaults are applied. The official Strapi recipe
+        # uses the same bare httpGet pattern without timeout overrides.
+
+    run:
+      envVariables:
+        # Route all outbound email to Mailpit. Nothing reaches a real inbox.
+        # Access captured messages at the mailpit service subdomain on port 8025.
+        EMAIL_TRANSPORT: smtp
+        EMAIL_SMTP_HOST: mailpit
+        EMAIL_SMTP_PORT: "1025"
+
+        # The seed hook fires on every server.start and inserts demo content if
+        # the seed_runs table has no record for this SEED_VERSION value. Bump
+        # the version string to re-seed on the next deploy.
+        SEED_VERSION: "1.0.0"
+
+      initCommands:
+        # bootstrap is version-scoped so it re-runs on every deploy, picking up
+        # any new built-in Directus database migrations automatically.
+        - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
+        # schema-cms-v1 uses a fixed key so it runs at most once per project lifetime.
+        # ensure-schema.mjs adds a second guard: it checks hasTable('categories')
+        # before calling schema apply, preventing data loss on re-runs.
+        # To apply a new snapshot to a fresh database: change the key to schema-cms-v2.
+        - zsc execOnce "schema-cms-v1" -- node scripts/ensure-schema.mjs
+
+      start: node_modules/.bin/directus start
+
+      healthCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
+  # ── prod ──────────────────────────────────────────────────────────────────
+  # Multi-container HA production environment. minContainers ≥ 2 in import.yaml
+  # guarantees zero-downtime rolling deployments — Zerops starts new containers,
+  # waits for the readiness check, then drains and removes old ones.
+  # Inherits all env variables from `base`.
+  - setup: prod
+    extends: base
+
+    build:
+      base: alpine/nodejs@22
+      buildCommands:
+        # npm ci installs exactly what is in package-lock.json (reproducible).
+        # ~/.npm caches downloaded tarballs between builds — on a cache hit,
+        # packages are read from disk rather than the registry (~5–10 s vs ~60–90 s).
+        - npm ci --omit=dev
+      deployFiles:
+        - node_modules
+        - package.json
+        - package-lock.json
+        - data        # Seed input: data.json, images/, uploads/
+        - database    # snapshot.yaml — applied by scripts/ensure-schema.mjs
+        - extensions  # directus-extension-seed-demo auto-healing hook
+        - scripts     # ensure-schema.mjs conditional schema apply guard
+      cache: ~/.npm
 
     deploy:
       readinessCheck:
@@ -118,12 +192,12 @@ zerops:
           path: /server/health
 
     run:
-      # zsc execOnce: only the first container per deploy runs each command.
-      # Remaining containers in the HA pool see the lock taken and skip to `start`.
-      # See https://docs.zerops.io/references/zsc#execonce
       initCommands:
+        # zsc execOnce acquires a distributed lock so that only the first container
+        # per deploy runs each command. All other containers in the HA pool skip
+        # straight to `start`. See https://docs.zerops.io/references/zsc#execonce
         - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
-        - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
+        - zsc execOnce "schema-cms-v1" -- node scripts/ensure-schema.mjs
 
       start: node_modules/.bin/directus start
 
@@ -133,55 +207,8 @@ zerops:
           path: /server/health
 
   # ── directus ──────────────────────────────────────────────────────────────
-  # Hostname-matched alias for the production setup. Zerops resolves the setup
-  # by service hostname when `zeropsSetup` is not explicitly set in import.yaml.
-  # Projects imported without `zeropsSetup: prod` will fall through to this block.
-  # Extends prod so both are always in sync — only the name differs.
+  # Hostname-matched alias for prod. When a service's hostname is `directus`
+  # and no `zeropsSetup` is specified in import.yaml, Zerops resolves this
+  # block automatically — ensuring the recipe works without explicit setup selection.
   - setup: directus
     extends: prod
-
-  # ── dev ───────────────────────────────────────────────────────────────────
-  # Development setup. Referenced in recipes/directus/0 — Development/import.yaml
-  # via `zeropsSetup: dev`. Extends base for all env variables.
-  - setup: dev
-    extends: base
-
-    build:
-      base: nodejs@22
-      buildCommands:
-        - npm ci --omit=dev
-      deployFiles:
-        - node_modules
-        - package.json
-        - package-lock.json
-        - data
-        - database
-        - extensions
-      cache: node_modules
-
-    deploy:
-      readinessCheck:
-        httpGet:
-          port: 8055
-          path: /server/health
-
-    run:
-      envVariables:
-        # ── Email (Mailpit SMTP sink) ─────────────────────────────────────────
-        # Dev-only: route all outgoing email to Mailpit for inspection in its UI.
-        # In production this block is absent; Directus defaults to sendmail
-        # (no network health check), so /server/health stays green without SMTP.
-        EMAIL_TRANSPORT: smtp
-        EMAIL_SMTP_HOST: mailpit
-        EMAIL_SMTP_PORT: "1025"
-
-      initCommands:
-        - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
-        - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
-
-      start: node_modules/.bin/directus start
-
-      healthCheck:
-        httpGet:
-          port: 8055
-          path: /server/health

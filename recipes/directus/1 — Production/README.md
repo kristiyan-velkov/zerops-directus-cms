@@ -25,8 +25,9 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
 
 4. **Configure a real SMTP provider** — The production environment does not include Mailpit. Set the following environment variables on the `directus` service to enable email delivery:
    ```
-   DIRECTUS_SMTP_HOST      smtp.sendgrid.net          # your SMTP host
-   DIRECTUS_SMTP_PORT      587
+   EMAIL_TRANSPORT         smtp
+   EMAIL_SMTP_HOST         smtp.sendgrid.net          # your SMTP host
+   EMAIL_SMTP_PORT         587
    DIRECTUS_EMAIL_FROM     no-reply@yourdomain.com
    ```
    Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as **secret** environment variables for your SMTP credentials.
@@ -56,10 +57,10 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
 
 ## What runs on every Production deploy
 
-The single `setup: directus` in `zerops.yaml` runs two idempotent `zsc execOnce` steps before `directus start`:
+The `setup: prod` in `zerops.yaml` runs two idempotent `zsc execOnce` steps before `directus start`:
 
 1. `directus bootstrap` — system tables + first admin user
-2. `directus schema apply --yes ./database/snapshot.yaml` — `categories`, `authors`, `posts` collections
+2. `node scripts/ensure-schema.mjs` — checks if `categories` table exists; only calls `directus schema apply --yes ./database/snapshot.yaml` on a fresh database, never on an existing one
 
 Once `directus start` is listening, the `extensions/directus-extension-seed-demo` extension fires on `server.start` and inserts the demo content (3 categories, 2 authors, 4 posts) via Knex-direct `INSERT`.
 

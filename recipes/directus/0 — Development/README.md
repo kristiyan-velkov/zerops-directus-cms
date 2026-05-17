@@ -44,10 +44,10 @@ This is a development environment for [Directus (info + deploy)](https://app.zer
 
 ## What runs on every Development deploy
 
-The single `setup: directus` in `zerops.yaml` runs two idempotent `zsc execOnce` steps before `directus start`:
+The `setup: dev` in `zerops.yaml` runs two idempotent `zsc execOnce` steps before `directus start`:
 
 1. `directus bootstrap` — system tables + first admin user
-2. `directus schema apply --yes ./database/snapshot.yaml` — `categories`, `authors`, `posts` collections
+2. `node scripts/ensure-schema.mjs` — checks if `categories` table exists; only calls `directus schema apply --yes ./database/snapshot.yaml` on a fresh database, skips safely on every restart
 
 Once `directus start` is listening, the `extensions/directus-extension-seed-demo` extension fires on `server.start` and inserts the demo content (3 categories, 2 authors, 4 posts) via Knex-direct `INSERT` — but **only when the target tables are empty**. This makes the seeder *auto-healing*: delete a row in the Data Studio, restart the container, and the row comes back.
 

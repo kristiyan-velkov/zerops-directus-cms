@@ -38,13 +38,13 @@ Browser / API clients
 
 ## Services
 
-| Service    | Type           | Dev         | Production                 |
-| ---------- | -------------- | ----------- | -------------------------- |
-| `directus` | Node.js 22     | 1 container | 2–6 containers (autoscale) |
-| `db`       | PostgreSQL 16  | NON_HA      | HA (3-node cluster)        |
-| `cache`    | Valkey 7.2     | NON_HA      | HA                         |
-| `storage`  | Object Storage | 10 GB       | 50 GB                      |
-| `mailpit`  | Mailpit        | ✓ included  | ✗ use real SMTP            |
+| Service    | Type                    | Dev         | Production                 |
+| ---------- | ----------------------- | ----------- | -------------------------- |
+| `directus` | Alpine Node.js 22 (LTS) | 1 container | 2–6 containers (autoscale) |
+| `db`       | PostgreSQL 16           | NON_HA      | HA (3-node cluster)        |
+| `cache`    | Valkey 7.2              | NON_HA      | HA                         |
+| `storage`  | Object Storage          | 10 GB       | 50 GB                      |
+| `mailpit`  | Mailpit                 | ✓ included  | ✗ use real SMTP            |
 
 &nbsp;
 
@@ -67,7 +67,7 @@ Browser / API clients
 │   └── 1 — Production/import.yaml      ← Production environment (HA services, 2–6 containers)
 ├── docker-compose.yml                  ← local stack with full Zerops parity
 ├── package.json
-└── zerops.yaml                         ← build + run pipeline (`base`, `prod`, `directus`, `dev` setups)
+└── zerops.yaml                         ← build + run pipeline (`base`, `dev`, `prod`, `directus` setups)
 ```
 
 > Layout follows the official [`zerops-recipe-apps/strapi-app`](https://github.com/zerops-recipe-apps/strapi-app) convention so the recipe is immediately familiar to anyone who has worked with other Zerops headless-CMS recipes.
@@ -76,12 +76,12 @@ Browser / API clients
 
 ## Deployment flow
 
-A single `zerops.yaml` drives every environment via four setups (`base`, `prod`, `directus`, `dev`). Two `initCommands` run before the HTTP server starts, each wrapped in `zsc execOnce` so multi-container deploys execute exactly once. Demo content is then seeded by a Directus extension hook the first time the server reaches `server.start`:
+A single `zerops.yaml` drives every environment via four setups (`base`, `dev`, `prod`, `directus`). Two `initCommands` run before the HTTP server starts, each wrapped in `zsc execOnce` so multi-container deploys execute exactly once. Demo content is then seeded by a Directus extension hook the first time the server reaches `server.start`:
 
 | Step | Command / hook                                                    | Idempotent via                                               |
 | ---- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
 | 1    | `directus bootstrap`                                              | `Database already initialized, skipping install`             |
-| 2    | `directus schema apply --yes ./database/snapshot.yaml`            | Directus diff engine — only applies the delta                |
+| 2    | `node scripts/ensure-schema.mjs`                                  | `hasTable('categories')` DB check — skips on existing DBs    |
 | 3    | `directus start` (foreground)                                     | —                                                            |
 | 4    | `extensions/directus-extension-seed-demo` fires on `server.start` | `seed_runs` table keyed on `SEED_VERSION` env var            |
 
@@ -90,10 +90,11 @@ A single `zerops.yaml` drives every environment via four setups (`base`, `prod`,
    └── Creates all Directus system tables
    └── Creates the first admin user from ADMIN_EMAIL + ADMIN_PASSWORD
 
-2. directus schema apply --yes ./database/snapshot.yaml
-   └── Creates collections: categories, authors, posts
-   └── Creates all fields, relationships, and display settings
-   └── Idempotent — already-existing schema is skipped via Directus diff engine
+2. node scripts/ensure-schema.mjs
+   └── Checks if `categories` table exists in the database
+   └── Fresh DB  → calls `directus schema apply --yes ./database/snapshot.yaml`
+        └── Creates collections: categories, authors, posts + all fields, relations, display settings
+   └── Existing DB → skips schema apply entirely (data-safe guard — never destroys content)
 
 3. directus start
    └── Launches the HTTP server on port 8055
@@ -104,7 +105,7 @@ A single `zerops.yaml` drives every environment via four setups (`base`, `prod`,
    ├── Uploads seed images to object storage via FilesService (idempotent per filename)
    ├── Patches the admin user profile (avatar, title, location, description, tags)
    └── In one transaction:
-        ├── For each collection: INSERT rows from data/data.json if table is empty
+        ├── For each collection: INSERT only missing seed rows (keyed on fixed UUIDs)
         ├── Inserts the Insights dashboard and panels into directus_dashboards / directus_panels
         └── Records SEED_VERSION in seed_runs (commit = seed complete)
 ```
@@ -263,13 +264,13 @@ Local credentials are in `.env` — see `.env.example` for all options.
 
 **Local service equivalents:**
 
-| Zerops service              | Local Docker image                         |
-| --------------------------- | ------------------------------------------ |
-| `postgresql@16`             | `postgres:16-alpine`                       |
-| `valkey@7.2`                | `valkey/valkey:7.2.13-alpine`              |
-| `object-storage`            | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
-| `mailpit-app`               | `axllent/mailpit:v1.29.7`                  |
-| `nodejs@22` + `directus@11` | `directus/directus:11.17.4`                |
+| Zerops service                      | Local Docker image                         |
+| ----------------------------------- | ------------------------------------------ |
+| `postgresql@16`                     | `postgres:16-alpine`                       |
+| `valkey@7.2`                        | `valkey/valkey:7.2.13-alpine`              |
+| `object-storage`                    | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
+| `mailpit-app`                       | `axllent/mailpit:v1.29.7`                  |
+| `alpine/nodejs@22` + `directus@11`  | `directus/directus:11.17.4`                |
 
 &nbsp;
 
@@ -301,7 +302,12 @@ If you extend the schema (new collections, fields, relations):
    docker compose exec directus node cli.js schema snapshot /directus/database/snapshot.yaml
    ```
 3. Commit `database/snapshot.yaml`.
-4. Push — on next deploy `schema apply` will diff and apply only the new changes.
+4. In `zerops.yaml`, increment the `execOnce` key for `ensure-schema.mjs`:
+   ```yaml
+   - zsc execOnce "schema-cms-v2" -- node scripts/ensure-schema.mjs
+   ```
+   > **Why?** `ensure-schema.mjs` guards against re-applying the snapshot on an existing database by checking whether the `categories` table already exists. Bumping the execOnce key alone is not enough — the `hasTable` guard will still skip on a populated database. Schema changes on an existing production instance should be applied via the Directus CLI or the Admin UI, and the snapshot committed to keep source control in sync.
+5. Push — the updated snapshot is deployed with the next build.
 
 &nbsp;
 
@@ -319,7 +325,7 @@ The `ADMIN_PASSWORD` and `ADMIN_TOKEN` are auto-generated at import time:
 
 **Horizontal** — update `minContainers` / `maxContainers` on the `directus` service in the Zerops GUI, or edit the import YAML and re-import.
 
-**Vertical** — Zerops autoscales RAM and CPU within the bounds set in `verticalAutoscaling` (default: 1–16 GB RAM, 1–10 vCPU in production).
+**Vertical** — Zerops autoscales RAM and CPU within the bounds set in `verticalAutoscaling` (default: 1–16 GB RAM, 1–8 vCPU in production).
 
 &nbsp;
 
