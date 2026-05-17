@@ -192,6 +192,14 @@ zerops:
           path: /server/health
 
     run:
+      envVariables:
+        # The seed hook fires on every server.start and inserts demo content if
+        # the seed_runs table has no record for this SEED_VERSION value. Bump
+        # the version string to re-seed on the next deploy.
+        # Remove this variable (or delete it from the Zerops GUI) to disable seeding
+        # on environments that hold real user data.
+        SEED_VERSION: "1.0.0"
+
       initCommands:
         # zsc execOnce acquires a distributed lock so that only the first container
         # per deploy runs each command. All other containers in the HA pool skip

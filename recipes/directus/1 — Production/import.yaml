@@ -70,11 +70,6 @@ services:
     enableSubdomainAccess: true
     minContainers: 2
     maxContainers: 6
-    # NOTE: SEED_VERSION is deliberately absent from envSecrets here.
-    # The seed hook is a no-op when SEED_VERSION is unset — production content
-    # is never overwritten. To seed demo data on production, add:
-    #   SEED_VERSION: "1.0.0"
-    # to this envSecrets block or set it in the Zerops GUI after deploy.
     # Directus 11 + Node.js 22 idles at ~300–500 MB per container.
     # Cold-start (bootstrap + schema apply + seed) can spike to ~700–900 MB.
     # With minContainers=2 and minRam=1, total minimum is 2 GB — adequate headroom.
@@ -101,3 +96,8 @@ services:
       # or remove it entirely once pipelines are configured via scoped tokens.
       # To disable: Zerops GUI → service → Environment Variables → delete ADMIN_TOKEN.
       ADMIN_TOKEN: <@generateRandomString(<40>)>
+
+      # Seed version — the seed hook runs once per unique value of this variable.
+      # Bump to re-seed on the next deploy (e.g. after updating data.json).
+      # Remove or leave empty to disable seeding (recommended once you have real data).
+      SEED_VERSION: "1.0.0"
