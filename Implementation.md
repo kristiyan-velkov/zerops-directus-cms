@@ -187,21 +187,30 @@ deploy:
     httpGet:
       port: 8055
       path: /server/health
-    failureTimeout: 120
-    retryPeriod: 3
+    failureTimeout: 180s
+    retryPeriod: 5s
 ```
 
-Zerops polls `GET /server/health` every 3 seconds. The 120-second window covers the full boot sequence: `bootstrap` (~1 s) + `schema apply` (~2 s) + `directus start` (~3 s). The actual server is usually healthy within 8–10 seconds.
+Zerops polls `GET /server/health` every 5 seconds. The 180-second window covers the full boot sequence on a cold database: `bootstrap` + `ensure-schema.mjs` (schema apply on first deploy) + `directus start`. Warm restarts are typically healthy within 8–10 seconds. Duration values must be Go `time.Duration` strings — a bare integer causes an unmarshal error.
 
 ### initCommands — run exactly once per deploy
 
 ```yaml
 initCommands:
   - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
-  - zsc execOnce "schema-$ZEROPS_appVersionId"    -- node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml
+  - zsc execOnce "schema-cms-v1"                  -- node scripts/ensure-schema.mjs
 ```
 
-`zsc execOnce` is the Zerops CLI primitive for idempotent distributed commands. When a deploy starts multiple containers simultaneously (as in the Production HA setup), only the **first container to acquire the lock** runs the command. All others see the lock already taken and skip straight to `start`. This guarantees migrations run exactly once per deploy version, even at any replica count.
+`zsc execOnce` is the Zerops CLI primitive for idempotent distributed commands. When a deploy starts multiple containers simultaneously (as in the Production HA setup), only the **first container to acquire the lock** runs the command. All others see the lock already taken and skip straight to `start`.
+
+The two keys use different strategies deliberately:
+
+| Command | Key strategy | Why |
+|---|---|---|
+| `directus bootstrap` | `"bootstrap-$ZEROPS_appVersionId"` (version-scoped) | Must re-run on every deploy to apply new built-in Directus migrations |
+| `node scripts/ensure-schema.mjs` | `"schema-cms-v1"` (fixed) | Must run **at most once per project lifetime** — schema apply is destructive on existing data. Increment to `"schema-cms-v2"` only when intentionally re-applying a changed snapshot to a fresh database. |
+
+`ensure-schema.mjs` adds a second safety layer on top of the execOnce lock: it queries `information_schema.tables` and skips `schema apply` if the `categories` table already exists — making it safe even if the execOnce lock were somehow lost.
 
 <!-- IMAGE PLACEHOLDER
   Description: Zerops service logs view showing the three initCommand lines in sequence: "Database already initialized, skipping install", "Snapshot applied successfully", "Server started at http://0.0.0.0:8055", followed by the seed hook log lines.
@@ -216,13 +225,13 @@ healthCheck:
   httpGet:
     port: 8055
     path: /server/health
-  failureTimeout: 60
-  disconnectTimeout: 30
-  recoveryTimeout: 30
-  execPeriod: 15
+  failureTimeout: 60s
+  disconnectTimeout: 30s
+  recoveryTimeout: 30s
+  execPeriod: 15s
 ```
 
-Zerops probes the running container every 15 seconds. If `/server/health` stops responding, the container is replaced automatically.
+Zerops probes the running container every 15 seconds. If `/server/health` stops responding within 60 seconds, the container is removed from the load-balancer (`disconnectTimeout: 30s`) and replaced. Once health checks resume passing, it is re-added after `recoveryTimeout: 30s`.
 
 ---
 
@@ -291,7 +300,7 @@ Production uses **HA mode** for both database and cache, more storage, and horiz
       minRam: 1
       maxRam: 16
       minCpu: 1
-      maxCpu: 10
+      maxCpu: 8
 ```
 
 The Production environment does not include Mailpit — real SMTP is configured via environment variables added in the Zerops GUI after deploy.
@@ -571,7 +580,7 @@ docker compose up -d
 |---|---|
 | `postgresql@16` | `postgres:16-alpine` |
 | `valkey@7.2` | `valkey/valkey:7.2.13-alpine` |
-| `object-storage` | `minio/minio` |
+| `object-storage` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
 | `mailpit-app` | `axllent/mailpit:v1.29.7` |
 | `nodejs@22` + `directus@11` | `directus/directus:11.17.4` |
 
@@ -702,7 +711,7 @@ Zerops automatically adjusts RAM and CPU within the configured bounds:
 | Resource | Dev default | Prod default |
 |---|---|---|
 | RAM | 1–4 GB | 1–16 GB |
-| CPU | 1 vCPU | 1–10 vCPU |
+| CPU | 1 vCPU | 1–8 vCPU |
 
 Directus is CPU-bound during image transformations and RAM-bound during large collection queries. Increase `maxRam` if you process many file uploads.
 
@@ -712,13 +721,16 @@ Directus is CPU-bound during image transformations and RAM-bound during large co
 
 | Decision | Alternative considered | Why this approach |
 |---|---|---|
-| **Single `setup: directus` in `zerops.yaml`** | Separate `setup: dev` and `setup: prod` | Both environments use the same build and runtime logic; differences live in `import.yaml` service config and env vars, not in the pipeline. Single setup = single truth, easier to maintain. |
+| **Four setups in `zerops.yaml`: `base`, `dev`, `prod`, `directus`** | Single setup for all environments | `base` keeps all shared env vars DRY. `dev` and `prod` extend it and add only what differs (email transport, SEED_VERSION, HA initCommands). `directus` is a hostname-matched alias for `prod` so imports without `zeropsSetup` still resolve. |
+| **`ensure-schema.mjs` instead of raw `directus schema apply`** | Calling `directus schema apply` directly in initCommands | `schema apply` is destructive if run against a database that already has custom collections — it would drop and recreate tables, wiping all rows. `ensure-schema.mjs` checks `hasTable('categories')` first and only applies on a genuinely fresh database. |
+| **Fixed execOnce key for schema (`"schema-cms-v1"`)** | Version-scoped key like `"schema-$ZEROPS_appVersionId"` | A version-scoped key would re-run `ensure-schema.mjs` on every deploy. Combined with the `hasTable` guard, that is safe but wasteful. A fixed key runs the script at most once per project lifetime — correct for a one-time initial schema setup. |
 | **`zsc execOnce` for initCommands** | Plain commands (run on every container) | In a multi-container HA deploy, plain commands would run concurrently on all containers, causing migration race conditions. `execOnce` acquires a distributed lock. |
-| **Directus extension hook for seeding** | Directus migration | Migrations run exactly once ever (tracked in `directus_migrations`). The hook runs on every boot and checks if tables are empty — correct semantics for a seed. Also auto-heals deleted rows on restart. |
+| **Directus extension hook for seeding** | Directus migration | Migrations run exactly once ever (tracked in `directus_migrations`). The hook runs on every boot, checks `seed_runs` keyed on `SEED_VERSION`, and inserts only missing rows — correct semantics for a seed that auto-heals deleted content. |
 | **`server.start` event (not `init.app.after`)** | `init.app.after` | `init.app.*` fires before schema is fully loaded in some Directus 11 versions (issue [#25500](https://github.com/directus/directus/issues/25500)). `server.start` is safe. |
 | **Knex-direct INSERT (not HTTP API)** | `POST /items/<collection>` via the REST API | HTTP seeding requires `/server/health` polling + `/auth/login` round-trips, adding 15–25 s to boot time. Knex direct is ~50 ms for the whole seed. |
 | **`FORCE_PATH_STYLE=true` for S3** | Default virtual-hosted style | Zerops object storage uses a single endpoint hostname. AWS-style `bucket.host` addressing is not supported on custom S3 endpoints. |
 | **Mailpit in Development, no Mailpit in Production** | Mailpit in both environments | Mailpit is a dev tool. Production should use a real SMTP provider with deliverability tracking. The `import.yaml` files for each environment reflect this cleanly. |
+| **`SEED_VERSION` only in `dev` setup, absent from `base`** | `SEED_VERSION` in `base` (inherited by all setups) | Production should never seed demo content by default. Keeping `SEED_VERSION` out of `base` means production is safe without any operator action. Operators opt in explicitly by adding `SEED_VERSION` as an env secret in the Zerops GUI. |
 
 ---
 
