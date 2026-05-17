@@ -43,7 +43,7 @@ import { createRequire } from 'node:module';
 import { execSync }      from 'node:child_process';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readdirSync }   from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 
 const __dirname   = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
@@ -116,9 +116,15 @@ try {
 
   console.log('[schema] Fresh database detected — applying schema snapshot…');
 
+  // Zerops: npm ci produces a flat node_modules — binary is at node_modules/.bin/directus.
+  // Docker official image (directus/directus): uses pnpm; CLI is node cli.js from /directus/.
+  const directusCli = existsSync(join(projectRoot, 'node_modules', '.bin', 'directus'))
+    ? 'node_modules/.bin/directus'
+    : 'node cli.js';
+
   try {
     execSync(
-      `node_modules/.bin/directus schema apply --yes ./database/snapshot.yaml`,
+      `${directusCli} schema apply --yes ./database/snapshot.yaml`,
       { stdio: 'inherit', env: process.env, cwd: projectRoot },
     );
   } catch (err) {

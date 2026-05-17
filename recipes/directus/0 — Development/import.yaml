@@ -28,6 +28,8 @@ services:
   # Stores all Directus file uploads. 'public-read' makes uploaded assets
   # accessible without authentication — required for serving images in the
   # Data Studio and via the /assets endpoint.
+  # To increase storage: Zerops GUI → storage service → resize (may require brief downtime).
+  # Monitor usage at: Zerops GUI → storage service → Overview.
   - hostname: storage
     type: object-storage
     priority: 8
@@ -55,6 +57,8 @@ services:
   # source code or import YAML in plaintext.
   - hostname: directus
     type: alpine/nodejs@22
+    # IMPORTANT: Change this to your own repository before deploying to production.
+    # Leaving it as-is builds from the public recipe repo, not your customised fork.
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
     # `zeropsSetup: dev` selects the `setup: dev` block from zerops.yaml.
     # It extends `setup: base` (shared env variables) and adds the dev-specific
@@ -65,7 +69,8 @@ services:
     enableSubdomainAccess: true
     minContainers: 1
     maxContainers: 1
-    # Minimal vertical scaling for development.
+    # Directus 11 idles at ~300–500 MB. Cold-start (bootstrap + schema apply + seed)
+    # can spike to ~700–900 MB. minRam=1 provides adequate headroom for development.
     verticalAutoscaling:
       minRam: 1
       maxRam: 4
@@ -81,6 +86,9 @@ services:
 
       # Static API token for CI/CD pipelines and automation scripts.
       # Use this instead of a password-based login for programmatic access.
+      # ⚠ This token has full admin privileges. Rotate it after initial CI/CD setup
+      # or remove it entirely once pipelines are configured via scoped tokens.
+      # To disable: Zerops GUI → service → Environment Variables → delete ADMIN_TOKEN.
       ADMIN_TOKEN: <@generateRandomString(<40>)>
 
       # Seed version — the seed hook runs once per unique value of this variable.
