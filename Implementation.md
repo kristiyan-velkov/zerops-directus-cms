@@ -146,6 +146,9 @@ zerops-directus-cms/
 │           ├── import.yaml                  ← HA services, 2–6 containers
 │           └── README.md                    ← Prod-specific guide
 │
+├── scripts/
+│   └── ensure-schema.mjs                    ← idempotent schema apply; skips if DB already seeded
+│
 ├── docker-compose.yml                       ← local stack (full Zerops parity)
 ├── package.json                             ← Directus + scripts
 ├── zerops.yaml                              ← build + run pipeline

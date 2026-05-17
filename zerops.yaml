@@ -2,7 +2,7 @@
 
 zerops:
   # ── base ──────────────────────────────────────────────────────────────────
-  # Shared runtime configuration inherited by `dev` and `prod` via `extends`.
+  # Shared runtime configuration inherited by `development` and `production` via `extends`.
   - setup: base
     run:
       base: alpine/nodejs@22
@@ -40,7 +40,7 @@ zerops:
         DB_CLIENT: pg
         DB_HOST: ${db_hostname}
         DB_PORT: "5432"
-        DB_DATABASE: ${db_hostname}
+        DB_DATABASE: ${db_dbName}
         DB_USER: ${db_user}
         DB_PASSWORD: ${db_password}
         # With N containers: N×2 idle connections are always open.
@@ -86,7 +86,7 @@ zerops:
 
         # ── Email ────────────────────────────────────────────────────────────
         # EMAIL_TRANSPORT is intentionally absent — each environment sets its own
-        # transport: dev routes to Mailpit; prod defaults to Directus sendmail until
+        # transport: development routes to Mailpit; production defaults to Directus sendmail until
         # a real SMTP provider is configured in the Zerops GUI.
         # To configure SMTP: add EMAIL_TRANSPORT, EMAIL_SMTP_HOST, EMAIL_SMTP_PORT,
         # EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, and EMAIL_FROM via the Zerops GUI.
@@ -192,13 +192,12 @@ zerops:
           path: /server/health
 
     run:
-      envVariables:
-        # The seed hook fires on every server.start and inserts demo content if
-        # the seed_runs table has no record for this SEED_VERSION value. Bump
-        # the version string to re-seed on the next deploy.
-        # Remove this variable (or delete it from the Zerops GUI) to disable seeding
-        # on environments that hold real user data.
-        SEED_VERSION: "1.0.0"
+      # SEED_VERSION is intentionally absent from this run block.
+      # It is provided as an envSecret in recipes/directus/1 — Production/import.yaml
+      # so that demo content is seeded on the very first deploy.
+      # Once you have real production content, remove SEED_VERSION from the
+      # service's Secret Variables in the Zerops GUI — the seed hook is a no-op
+      # when the variable is unset, so existing content is never overwritten.
 
       initCommands:
         # zsc execOnce acquires a distributed lock so that only the first container
