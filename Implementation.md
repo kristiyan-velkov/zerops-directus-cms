@@ -34,7 +34,7 @@ After a single Zerops import, you have:
 
 | What | Details |
 |---|---|
-| Directus 11 running on Node.js 22 | Production HTTP server on port 8055 |
+| Directus 11 running on Alpine Node.js 22 (LTS) | Production HTTP server on port 8055 |
 | PostgreSQL 16 | Primary datastore (NON_HA in dev, 3-node HA cluster in prod) |
 | Valkey 7.2 (Redis-compatible) | Cache + pub/sub sync for multi-container deployments |
 | S3-compatible object storage | File uploads, image transformations |
@@ -75,7 +75,7 @@ Select **Development** or **Production**, confirm the import, and Zerops will:
 
 1. Provision all services in parallel (db, cache, storage, mailpit, directus)
 2. Build Directus from this repository (`npm ci --omit=dev`)
-3. Run `directus bootstrap` → `directus schema apply` before starting the server
+3. Run `directus bootstrap` → `node scripts/ensure-schema.mjs` (applies schema only on a fresh DB) before starting the server
 4. Start Directus; the seed hook fires automatically on `server.start`
 
 The whole process takes approximately **2–3 minutes** on a cold start.
@@ -100,7 +100,7 @@ The whole process takes approximately **2–3 minutes** on a cold start.
 Browser / API clients
         ↓  HTTPS (Zerops edge)
 ┌─────────────────────────────────┐
-│  Directus 11  (Node.js 22)      │
+│  Directus 11  (Alpine Node.js 22)│
 │  port 8055                      │
 │                                 │
 │  ┌──────────────────────────┐   │
@@ -164,7 +164,7 @@ The layout mirrors the official [`zerops-recipe-apps/strapi-app`](https://github
 
 ```yaml
 build:
-  base: nodejs@22
+  base: alpine/nodejs@22
   buildCommands:
     - npm ci --omit=dev        # install production deps only
   deployFiles:
@@ -187,11 +187,13 @@ deploy:
     httpGet:
       port: 8055
       path: /server/health
-    failureTimeout: 180s
-    retryPeriod: 5s
+    failureTimeout: 180
+    retryPeriod: 5
 ```
 
-Zerops polls `GET /server/health` every 5 seconds. The 180-second window covers the full boot sequence on a cold database: `bootstrap` + `ensure-schema.mjs` (schema apply on first deploy) + `directus start`. Warm restarts are typically healthy within 8–10 seconds. Duration values must be Go `time.Duration` strings — a bare integer causes an unmarshal error.
+Zerops polls `GET /server/health` every 5 seconds. The 180-second window covers the full boot sequence on a cold database: `bootstrap` + `ensure-schema.mjs` (schema apply on first deploy) + `directus start`. Warm restarts are typically healthy within 8–10 seconds.
+
+> **Important:** `failureTimeout` and `retryPeriod` are **plain integers (seconds)**. The Zerops JSON schema declares them as `type: integer`. String values with unit suffixes (e.g. `"180s"`) will be rejected.
 
 ### initCommands — run exactly once per deploy
 
@@ -225,13 +227,15 @@ healthCheck:
   httpGet:
     port: 8055
     path: /server/health
-  failureTimeout: 60s
-  disconnectTimeout: 30s
-  recoveryTimeout: 30s
-  execPeriod: 15s
+  failureTimeout: 60
+  disconnectTimeout: 30
+  recoveryTimeout: 30
+  execPeriod: 15
 ```
 
-Zerops probes the running container every 15 seconds. If `/server/health` stops responding within 60 seconds, the container is removed from the load-balancer (`disconnectTimeout: 30s`) and replaced. Once health checks resume passing, it is re-added after `recoveryTimeout: 30s`.
+Zerops probes the running container every 15 seconds. If `/server/health` stops responding within 60 seconds, the container is removed from the load-balancer (`disconnectTimeout: 30`) and replaced. Once health checks resume passing, it is re-added after `recoveryTimeout: 30`.
+
+> **Important:** All `healthCheck` timing fields are **plain integers (seconds)**. The Zerops JSON schema declares all of them as `type: integer`. String values with unit suffixes will be rejected.
 
 ---
 
@@ -265,7 +269,7 @@ services:
     buildFromGit: https://github.com/zerops-recipe-apps/mailpit-app
 
   - hostname: directus
-    type: nodejs@22
+    type: alpine/nodejs@22
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
     minContainers: 1
     maxContainers: 1
@@ -321,10 +325,12 @@ docker compose exec directus node cli.js schema snapshot /directus/database/snap
 ### How it is applied on deploy
 
 ```bash
-directus schema apply --yes ./database/snapshot.yaml
+node scripts/ensure-schema.mjs
 ```
 
-The `--yes` flag skips the interactive confirmation prompt. Directus diffs the snapshot against the live database and applies only the delta — adding new collections and fields, never deleting existing ones. This makes `schema apply` safe to run on every deploy.
+`ensure-schema.mjs` checks whether the `categories` table already exists before calling `directus schema apply --yes ./database/snapshot.yaml`. If the table is present, schema apply is skipped entirely — protecting existing data. Schema apply only runs on a genuinely fresh (just-bootstrapped) database.
+
+> **Why not call `directus schema apply` directly in initCommands?** `schema apply` against a database that already has custom collections drops and recreates those tables, wiping all rows. Running it on every deploy would delete all content on every restart. `ensure-schema.mjs` adds a database-level guard that makes the command safe to call unconditionally.
 
 ### Adding new collections or fields
 
@@ -503,7 +509,7 @@ Add these environment variables to the `directus` service in the Zerops GUI afte
 EMAIL_TRANSPORT         smtp
 EMAIL_SMTP_HOST         smtp.sendgrid.net       # or your provider
 EMAIL_SMTP_PORT         587
-DIRECTUS_EMAIL_FROM     no-reply@yourdomain.com
+EMAIL_FROM              no-reply@yourdomain.com
 ```
 
 Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as **secret** environment variables.
@@ -582,7 +588,7 @@ docker compose up -d
 | `valkey@7.2` | `valkey/valkey:7.2.13-alpine` |
 | `object-storage` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
 | `mailpit-app` | `axllent/mailpit:v1.29.7` |
-| `nodejs@22` + `directus@11` | `directus/directus:11.17.4` |
+| `alpine/nodejs@22` + `directus@11` | `directus/directus:11.17.4` |
 
 ### Container startup sequence
 
@@ -648,7 +654,7 @@ In the Data Studio → **User Directory** → **Administrator** — update the e
 
 **6. (Production only) Configure SMTP**
 
-Add `EMAIL_TRANSPORT`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, and `DIRECTUS_EMAIL_FROM` to the service environment variables. Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as secrets.
+Add `EMAIL_TRANSPORT`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, and `EMAIL_FROM` to the service environment variables. Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as secrets.
 
 **7. (Production only) Set up database backups**
 

@@ -9,7 +9,8 @@ project:
 
 services:
   # ── 1. PostgreSQL database (HA) ───────────────────────────────────────────
-  # Highly-available PostgreSQL cluster with automatic failover.
+  # HA mode provisions a 3-node cluster with automatic failover and
+  # synchronous replication — no data loss on primary failure.
   # Deployed first (priority 10) so the database is ready before
   # any Directus container starts its initCommands.
   - hostname: db
@@ -18,7 +19,7 @@ services:
     priority: 10
 
   # ── 2. Valkey cache / pub-sub (HA) ────────────────────────────────────────
-  # Highly-available Valkey cluster required for multi-container Directus.
+  # HA Valkey cluster required for multi-container Directus.
   # Directus uses Valkey (via SYNCHRONIZATION_STORE=redis) to synchronise:
   #   - Schema cache invalidations  (prevents stale schema bugs)
   #   - Rate-limit counters         (prevents bypassing limits by hitting different containers)
@@ -53,7 +54,7 @@ services:
   #   EMAIL_TRANSPORT, EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, DIRECTUS_EMAIL_FROM
   #   EMAIL_SMTP_USER (secret), EMAIL_SMTP_PASSWORD (secret)
   - hostname: directus
-    type: nodejs@22
+    type: alpine/nodejs@22
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
     # `zeropsSetup: prod` selects the `setup: prod` block from zerops.yaml.
     # It extends `setup: base` (shared env variables) and adds the production-specific

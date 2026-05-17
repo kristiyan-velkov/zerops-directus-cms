@@ -54,7 +54,7 @@ services:
   # and are only ever visible in the Zerops GUI — they are never stored in
   # source code or import YAML in plaintext.
   - hostname: directus
-    type: nodejs@22
+    type: alpine/nodejs@22
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
     # `zeropsSetup: dev` selects the `setup: dev` block from zerops.yaml.
     # It extends `setup: base` (shared env variables) and adds the dev-specific

@@ -7,7 +7,7 @@ zerops:
   # build section differ between environments.
   - setup: base
     run:
-      base: nodejs@22
+      base: alpine/nodejs@22
 
       ports:
         - port: 8055
@@ -102,7 +102,7 @@ zerops:
     extends: base
 
     build:
-      base: nodejs@22
+      base: alpine/nodejs@22
       buildCommands:
         - npm ci --omit=dev
       deployFiles:
@@ -120,6 +120,8 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
+        failureTimeout: 180
+        retryPeriod: 5
 
     run:
       envVariables:
@@ -147,6 +149,11 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
+        # All healthCheck timing fields are plain integers (seconds), NOT strings.
+        failureTimeout: 60
+        disconnectTimeout: 30
+        recoveryTimeout: 30
+        execPeriod: 15
 
   # ── prod ──────────────────────────────────────────────────────────────────
   # Production setup. Referenced in recipes/directus/1 — Production/import.yaml
@@ -155,7 +162,7 @@ zerops:
     extends: base
 
     build:
-      base: nodejs@22
+      base: alpine/nodejs@22
       buildCommands:
         # npm ci = reproducible build from lockfile; --omit=dev keeps the artifact lean.
         - npm ci --omit=dev
@@ -178,6 +185,10 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
+        # Integers (seconds) — NOT strings. Zerops schema: `type: integer`.
+        # 180 s covers the worst case: cold-start DB + bootstrap + schema apply.
+        failureTimeout: 180
+        retryPeriod: 5
 
     run:
       # zsc execOnce: only the first container per deploy runs each command.
@@ -199,6 +210,11 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
+        # All healthCheck timing fields are plain integers (seconds), NOT strings.
+        failureTimeout: 60
+        disconnectTimeout: 30
+        recoveryTimeout: 30
+        execPeriod: 15
 
   # ── directus ──────────────────────────────────────────────────────────────
   # Hostname-matched alias for the production setup. Zerops resolves the setup

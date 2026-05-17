@@ -38,13 +38,13 @@ Browser / API clients
 
 ## Services
 
-| Service    | Type           | Dev         | Production                 |
-| ---------- | -------------- | ----------- | -------------------------- |
-| `directus` | Node.js 22     | 1 container | 2–6 containers (autoscale) |
-| `db`       | PostgreSQL 16  | NON_HA      | HA (3-node cluster)        |
-| `cache`    | Valkey 7.2     | NON_HA      | HA                         |
-| `storage`  | Object Storage | 10 GB       | 50 GB                      |
-| `mailpit`  | Mailpit        | ✓ included  | ✗ use real SMTP            |
+| Service    | Type                    | Dev         | Production                 |
+| ---------- | ----------------------- | ----------- | -------------------------- |
+| `directus` | Alpine Node.js 22 (LTS) | 1 container | 2–6 containers (autoscale) |
+| `db`       | PostgreSQL 16           | NON_HA      | HA (3-node cluster)        |
+| `cache`    | Valkey 7.2              | NON_HA      | HA                         |
+| `storage`  | Object Storage          | 10 GB       | 50 GB                      |
+| `mailpit`  | Mailpit                 | ✓ included  | ✗ use real SMTP            |
 
 &nbsp;
 
@@ -264,13 +264,13 @@ Local credentials are in `.env` — see `.env.example` for all options.
 
 **Local service equivalents:**
 
-| Zerops service              | Local Docker image                         |
-| --------------------------- | ------------------------------------------ |
-| `postgresql@16`             | `postgres:16-alpine`                       |
-| `valkey@7.2`                | `valkey/valkey:7.2.13-alpine`              |
-| `object-storage`            | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
-| `mailpit-app`               | `axllent/mailpit:v1.29.7`                  |
-| `nodejs@22` + `directus@11` | `directus/directus:11.17.4`                |
+| Zerops service                      | Local Docker image                         |
+| ----------------------------------- | ------------------------------------------ |
+| `postgresql@16`                     | `postgres:16-alpine`                       |
+| `valkey@7.2`                        | `valkey/valkey:7.2.13-alpine`              |
+| `object-storage`                    | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
+| `mailpit-app`                       | `axllent/mailpit:v1.29.7`                  |
+| `alpine/nodejs@22` + `directus@11`  | `directus/directus:11.17.4`                |
 
 &nbsp;
 
