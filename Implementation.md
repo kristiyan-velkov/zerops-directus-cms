@@ -193,7 +193,7 @@ deploy:
 
 Zerops polls `GET /server/health` every 5 seconds. The 180-second window covers the full boot sequence on a cold database: `bootstrap` + `ensure-schema.mjs` (schema apply on first deploy) + `directus start`. Warm restarts are typically healthy within 8–10 seconds.
 
-> **Important:** `failureTimeout` and `retryPeriod` are **plain integers (seconds)**. The Zerops JSON schema declares them as `type: integer`. String values with unit suffixes (e.g. `"180s"`) will be rejected.
+> **Note:** `failureTimeout` and `retryPeriod` are **plain integers (seconds)**, as documented by Zerops. Do not add a unit suffix (`180s`) — the Zerops documentation confirms integer-only values.
 
 ### initCommands — run exactly once per deploy
 
@@ -235,7 +235,7 @@ healthCheck:
 
 Zerops probes the running container every 15 seconds. If `/server/health` stops responding within 60 seconds, the container is removed from the load-balancer (`disconnectTimeout: 30`) and replaced. Once health checks resume passing, it is re-added after `recoveryTimeout: 30`.
 
-> **Important:** All `healthCheck` timing fields are **plain integers (seconds)**. The Zerops JSON schema declares all of them as `type: integer`. String values with unit suffixes will be rejected.
+> **Note:** All `healthCheck` timing fields are **plain integers (seconds)**, as documented by Zerops. Do not add a unit suffix (`60s`) — the Zerops documentation confirms integer-only values.
 
 ---
 
