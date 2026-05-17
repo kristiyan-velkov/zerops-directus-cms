@@ -65,6 +65,11 @@ services:
     enableSubdomainAccess: true
     minContainers: 2
     maxContainers: 6
+    # NOTE: SEED_VERSION is deliberately absent from envSecrets here.
+    # The seed hook is a no-op when SEED_VERSION is unset — production content
+    # is never overwritten. To seed demo data on production, add:
+    #   SEED_VERSION: "1.0.0"
+    # to this envSecrets block or set it in the Zerops GUI after deploy.
     verticalAutoscaling:
       minRam: 1
       maxRam: 16
