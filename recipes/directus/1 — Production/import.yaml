@@ -60,13 +60,13 @@ services:
     # IMPORTANT: Change this to your own repository before deploying to production.
     # Leaving it as-is builds from the public recipe repo, not your customised fork.
     buildFromGit: https://github.com/kristiyan-velkov/zerops-directus-cms
-    # `zeropsSetup: prod` selects the `setup: prod` block from zerops.yaml.
+    # `zeropsSetup: production` selects the `setup: production` block from zerops.yaml.
     # It extends `setup: base` (shared env variables) and adds the production-specific
     # build and initCommands. Demo content is seeded by the
     # `extensions/directus-extension-seed-demo` hook — only into empty tables,
     # so existing production content is never overwritten on redeploys.
     # To skip demo content entirely, delete `extensions/directus-extension-seed-demo/`.
-    zeropsSetup: prod
+    zeropsSetup: production
     enableSubdomainAccess: true
     minContainers: 2
     maxContainers: 6

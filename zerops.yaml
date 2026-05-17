@@ -96,10 +96,10 @@ zerops:
         # example.com is IANA-reserved and avoids SMTP rejection on misconfigured senders.
         EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@example.com}
 
-  # ── dev ───────────────────────────────────────────────────────────────────
+  # ── development ───────────────────────────────────────────────────────────
   # Single-container development environment with Mailpit email capture and
   # automatic demo content seeding. Inherits all env variables from `base`.
-  - setup: dev
+  - setup: development
     extends: base
 
     build:
@@ -160,12 +160,12 @@ zerops:
           port: 8055
           path: /server/health
 
-  # ── prod ──────────────────────────────────────────────────────────────────
+  # ── production ────────────────────────────────────────────────────────────
   # Multi-container HA production environment. minContainers ≥ 2 in import.yaml
   # guarantees zero-downtime rolling deployments — Zerops starts new containers,
   # waits for the readiness check, then drains and removes old ones.
   # Inherits all env variables from `base`.
-  - setup: prod
+  - setup: production
     extends: base
 
     build:
@@ -179,10 +179,10 @@ zerops:
         - node_modules
         - package.json
         - package-lock.json
-        - data        # Seed input: data.json, images/, uploads/
-        - database    # snapshot.yaml — applied by scripts/ensure-schema.mjs
-        - extensions  # directus-extension-seed-demo auto-healing hook
-        - scripts     # ensure-schema.mjs conditional schema apply guard
+        - data # Seed input: data.json, images/, uploads/
+        - database # snapshot.yaml — applied by scripts/ensure-schema.mjs
+        - extensions # directus-extension-seed-demo auto-healing hook
+        - scripts # ensure-schema.mjs conditional schema apply guard
       cache: ~/.npm
 
     deploy:
@@ -207,8 +207,8 @@ zerops:
           path: /server/health
 
   # ── directus ──────────────────────────────────────────────────────────────
-  # Hostname-matched alias for prod. When a service's hostname is `directus`
+  # Hostname-matched alias for production. When a service's hostname is `directus`
   # and no `zeropsSetup` is specified in import.yaml, Zerops resolves this
   # block automatically — ensuring the recipe works without explicit setup selection.
   - setup: directus
-    extends: prod
+    extends: production

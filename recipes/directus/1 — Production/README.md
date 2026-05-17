@@ -4,7 +4,7 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
 &nbsp;
 
 <!-- #ZEROPS_EXTRACT_START:intro# -->
-**Production** environment provides a production-ready, highly-available Directus setup. Runs 2–6 Directus containers behind a load balancer, with a highly-available PostgreSQL 16 cluster, a highly-available Valkey 7.2 cache cluster (required for multi-container session and schema-cache synchronisation), and 50 GB of S3-compatible object storage. All secrets are randomly generated at deploy time.
+**Production** environment provides a production-ready, highly-available Directus setup. Runs 2–6 Directus containers behind a load balancer, with a highly-available PostgreSQL 16 cluster, a highly-available Valkey 7.2 cache cluster (required for multi-container session and schema-cache synchronisation), and 50 GB of S3-compatible object storage. Rate limiting is enabled by default (Valkey-backed, shared across all containers). All secrets are randomly generated at deploy time.
 <!-- #ZEROPS_EXTRACT_END:intro# -->
 
 &nbsp;
@@ -21,7 +21,7 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
 
 2. **Log in to Directus** — Navigate to your subdomain URL and log in with `admin@example.com` and the generated `ADMIN_PASSWORD`. Change the admin email to a real address immediately.
 
-3. **Set PUBLIC_URL** — Copy the `directus` subdomain URL from the service detail page and set it as the `PUBLIC_URL` environment variable. Trigger a re-deploy to apply. This is required for OAuth flows, email magic-links, and CORS to work correctly.
+3. **`PUBLIC_URL` is pre-configured** — automatically set to `${zeropsSubdomain}` (your Zerops subdomain URL) at deploy time. No manual step required. When you connect a custom domain (step 6), update `PUBLIC_URL` to the custom domain and trigger a re-deploy — this is required for OAuth flows, email magic-links, and CORS.
 
 4. **Configure a real SMTP provider** — The production environment does not include Mailpit. Set the following environment variables on the `directus` service to enable email delivery:
    ```
@@ -30,11 +30,13 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
    EMAIL_SMTP_PORT         587
    DIRECTUS_EMAIL_FROM     no-reply@yourdomain.com
    ```
+   `DIRECTUS_EMAIL_FROM` overrides the default `EMAIL_FROM` fallback (`no-reply@example.com`) set in `zerops.yaml`.
+
    Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as **secret** environment variables for your SMTP credentials.
 
 5. **Set up database backups** — Configure daily automated backups in the `db` service settings panel in the Zerops GUI.
 
-6. **Connect your custom domain** — In the `directus` service, add your production domain and update `PUBLIC_URL` accordingly.
+6. **Connect your custom domain** — In the `directus` service, add your production domain and update `PUBLIC_URL` to the custom domain URL.
 
 &nbsp;
 
@@ -57,14 +59,14 @@ This is a Production environment for [Directus (info + deploy)](https://app.zero
 
 ## What runs on every Production deploy
 
-The `setup: prod` in `zerops.yaml` runs two idempotent `zsc execOnce` steps before `directus start`:
+The `setup: production` in `zerops.yaml` runs two idempotent `zsc execOnce` steps before `directus start`:
 
-1. `directus bootstrap` — system tables + first admin user
-2. `node scripts/ensure-schema.mjs` — checks if `categories` table exists; only calls `directus schema apply --yes ./database/snapshot.yaml` on a fresh database, never on an existing one
+1. `directus bootstrap` — creates Directus system tables and the first admin user (skips if already done)
+2. `node scripts/ensure-schema.mjs` — checks if the `categories` table exists; only calls `directus schema apply --yes ./database/snapshot.yaml` on a fresh database, never on an existing one. The Directus CLI path is auto-detected at runtime.
 
-Once `directus start` is listening, the `extensions/directus-extension-seed-demo` extension fires on `server.start` and inserts the demo content (3 categories, 2 authors, 4 posts) via Knex-direct `INSERT`.
+Once `directus start` is listening, the `extensions/directus-extension-seed-demo` extension fires on `server.start`. In production the `SEED_VERSION` env var is **not set by default**, so the hook skips entirely — existing production content is never overwritten on redeploys.
 
-> The hook only writes to **empty** tables — existing production content is never overwritten on redeploys. If you want production to start with no demo content at all, delete `extensions/directus-extension-seed-demo/` (or just `extensions/directus-extension-seed-demo/index.js`) on the production branch before deploying. Without the hook present, `data/data.json` is unused.
+> To start production with demo content, set `SEED_VERSION=1.0.0` in the Zerops GUI before the first deploy. To disable the seeder entirely, remove `extensions/directus-extension-seed-demo/` from the repository before deploying.
 
 &nbsp;
 

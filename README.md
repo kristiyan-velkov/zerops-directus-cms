@@ -31,7 +31,7 @@ Browser / API clients
     ├── PostgreSQL 16   ← primary datastore         (HA in production)
     ├── Valkey 7.2      ← cache + pub/sub sync       (HA in production)
     ├── Object Storage  ← S3-compatible file uploads (persistent)
-    └── Mailpit         ← SMTP sink for dev email    (dev only)
+    └── Mailpit         ← SMTP sink for dev email    (development only)
 ```
 
 &nbsp;
@@ -67,7 +67,7 @@ Browser / API clients
 │   └── 1 — Production/import.yaml      ← Production environment (HA services, 2–6 containers)
 ├── docker-compose.yml                  ← local stack with full Zerops parity
 ├── package.json
-└── zerops.yaml                         ← build + run pipeline (`base`, `dev`, `prod`, `directus` setups)
+└── zerops.yaml                         ← build + run pipeline (`base`, `development`, `production`, `directus` setups)
 ```
 
 > Layout follows the official [`zerops-recipe-apps/strapi-app`](https://github.com/zerops-recipe-apps/strapi-app) convention so the recipe is immediately familiar to anyone who has worked with other Zerops headless-CMS recipes.
@@ -76,7 +76,7 @@ Browser / API clients
 
 ## Deployment flow
 
-A single `zerops.yaml` drives every environment via four setups (`base`, `dev`, `prod`, `directus`). Two `initCommands` run before the HTTP server starts, each wrapped in `zsc execOnce` so multi-container deploys execute exactly once. Demo content is then seeded by a Directus extension hook the first time the server reaches `server.start`:
+A single `zerops.yaml` drives every environment via four setups (`base`, `development`, `production`, `directus`). Two `initCommands` run before the HTTP server starts, each wrapped in `zsc execOnce` so multi-container deploys execute exactly once. Demo content is then seeded by a Directus extension hook the first time the server reaches `server.start`:
 
 | Step | Command / hook                                                    | Idempotent via                                               |
 | ---- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -94,6 +94,7 @@ A single `zerops.yaml` drives every environment via four setups (`base`, `dev`, 
    └── Checks if `categories` table exists in the database
    └── Fresh DB  → calls `directus schema apply --yes ./database/snapshot.yaml`
         └── Creates collections: categories, authors, posts + all fields, relations, display settings
+        └── CLI auto-detected: node_modules/.bin/directus (Zerops) or node cli.js (Docker official image)
    └── Existing DB → skips schema apply entirely (data-safe guard — never destroys content)
 
 3. directus start
@@ -171,6 +172,9 @@ All other environment variables are declared in `zerops.yaml` under `envVariable
 | `TELEMETRY`                   | `"false"` | Disables anonymous usage stats                    |
 | `SYNCHRONIZATION_STORE`       | `redis`   | Enables Valkey-backed sync across containers      |
 | `STORAGE_S3_FORCE_PATH_STYLE` | `"true"`  | Required for custom S3 endpoints (Zerops / MinIO) |
+| `RATE_LIMITER_ENABLED`        | `"true"`  | Protects `/auth/login` from brute-force attacks   |
+| `RATE_LIMITER_STORE`          | `redis`   | Shares rate-limit counters across all containers  |
+| `PUBLIC_URL`                  | `${zeropsSubdomain}` | Auto-resolved to your Zerops subdomain — update if you connect a custom domain |
 
 &nbsp;
 
@@ -180,7 +184,7 @@ All other environment variables are declared in `zerops.yaml` under `envVariable
 
 2. **Log in** at your service's subdomain URL with `admin@example.com` and the revealed password.
 
-3. **Set `PUBLIC_URL`** — copy your subdomain URL (e.g. `https://directus-abc123.zerops.app`) and set it as the `PUBLIC_URL` environment variable on the service. This is required for password-reset email links and OAuth redirect URIs.
+3. **`PUBLIC_URL` is pre-configured** — it is automatically set to `${zeropsSubdomain}`, which Zerops resolves to your service's subdomain URL at deploy time. No manual step required. If you connect a custom domain, update `PUBLIC_URL` to the custom domain and trigger a re-deploy.
 
 4. **Change the admin email** — in the Data Studio, go to User Directory → Administrator and update the email to a real address.
 
@@ -194,7 +198,7 @@ All other environment variables are declared in `zerops.yaml` under `envVariable
 - **Rate-limit counters** — ensures limits aren't bypassed by hitting different containers
 - **Auth token blacklists** — ensures logout is respected by all containers immediately
 
-This setting is harmless in single-container dev and essential in multi-container production.
+This setting is harmless in single-container development and essential in multi-container production.
 
 The Production recipe sets `minContainers: 2` to guarantee **zero-downtime rolling upgrades**: Zerops starts new containers and waits for the readiness check (`GET /server/health`) to pass before terminating old ones.
 
@@ -227,11 +231,13 @@ STORAGE_S3_ACL=public-read
 **Production** — configure your SMTP provider by adding these env vars in the Zerops GUI:
 
 ```
-EMAIL_TRANSPORT        smtp
-EMAIL_SMTP_HOST        smtp.sendgrid.net
-EMAIL_SMTP_PORT        587
-DIRECTUS_EMAIL_FROM    no-reply@yourdomain.com
+EMAIL_TRANSPORT         smtp
+EMAIL_SMTP_HOST         smtp.sendgrid.net
+EMAIL_SMTP_PORT         587
+DIRECTUS_EMAIL_FROM     no-reply@yourdomain.com
 ```
+
+`DIRECTUS_EMAIL_FROM` overrides the default `EMAIL_FROM` fallback (`no-reply@example.com`) declared in `zerops.yaml`.
 
 Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as env **secrets**.
 
@@ -264,13 +270,15 @@ Local credentials are in `.env` — see `.env.example` for all options.
 
 **Local service equivalents:**
 
-| Zerops service                      | Local Docker image                         |
-| ----------------------------------- | ------------------------------------------ |
-| `postgresql@16`                     | `postgres:16-alpine`                       |
-| `valkey@7.2`                        | `valkey/valkey:7.2.13-alpine`              |
-| `object-storage`                    | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
-| `mailpit-app`                       | `axllent/mailpit:v1.29.7`                  |
-| `alpine/nodejs@22` + `directus@11`  | `directus/directus:11.17.4`                |
+| Zerops service                      | Local Docker image                                      |
+| ----------------------------------- | ------------------------------------------------------- |
+| `postgresql@16`                     | `postgres:16-alpine`                                    |
+| `valkey@7.2`                        | `valkey/valkey:7.2.13-alpine`                           |
+| `object-storage`                    | `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`     |
+| `mailpit-app`                       | `axllent/mailpit:v1.29.7`                               |
+| `alpine/nodejs@22` + `directus@11`  | `directus/directus:11.17.4`                             |
+
+> **MinIO registry note:** Docker Hub (`minio/minio`) is abandoned and contains unpatched CVEs. The local stack uses `quay.io/minio/minio` and `quay.io/minio/mc`, which continue to receive releases. The two images follow independent release schedules on quay.io — update them separately.
 
 &nbsp;
 
