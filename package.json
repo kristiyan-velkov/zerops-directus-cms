@@ -3,24 +3,43 @@
   "version": "1.0.0",
   "description": "Directus headless CMS — production-ready Zerops recipe with PostgreSQL, Valkey, S3 object storage, and auto-seeded demo content.",
   "private": true,
+  "license": "MIT",
   "author": {
     "name": "Kristiyan Velkov",
     "email": "christiyanweb@gmail.com",
     "url": "https://github.com/kristiyan-velkov"
   },
-  "engines": {
-    "node": ">=22"
+  "homepage": "https://github.com/kristiyan-velkov/zerops-directus-cms",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kristiyan-velkov/zerops-directus-cms.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kristiyan-velkov/zerops-directus-cms/issues"
   },
   "scripts": {
     "start": "directus start",
     "bootstrap": "directus bootstrap",
-    "schema:apply": "directus schema apply --yes ./database/snapshot.yaml",
-    "schema:snapshot": "directus schema snapshot ./database/snapshot.yaml"
+    "schema:snapshot": "directus schema snapshot ./database/snapshot.yaml",
+    "schema:apply:unsafe": "directus schema apply --yes ./database/snapshot.yaml"
   },
   "dependencies": {
     "directus": "11.17.4"
   },
-  "devDependencies": {
-    "@directus/sdk": "21.3.0"
+  "keywords": [
+    "directus",
+    "zerops",
+    "cms",
+    "headless",
+    "postgresql",
+    "valkey",
+    "redis",
+    "s3",
+    "object-storage",
+    "recipe",
+    "self-hosted"
+  ],
+  "engines": {
+    "node": "22.x"
   }
 }
