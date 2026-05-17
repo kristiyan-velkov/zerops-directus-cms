@@ -116,12 +116,6 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
-        # Must cover the full initCommands window: bootstrap + schema apply can
-        # take up to 2 minutes on first deploy or after a large schema change.
-        # Without this, Zerops health-checks the container before Directus has
-        # started, the check fails, and the seed hook never fires.
-        failureTimeout: 180
-        retryPeriod: 5
 
     run:
       # zsc execOnce: only the first container per deploy runs each command.
@@ -170,8 +164,6 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
-        failureTimeout: 180
-        retryPeriod: 5
 
     run:
       envVariables:
