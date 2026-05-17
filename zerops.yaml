@@ -95,6 +95,59 @@ zerops:
         #   EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, EMAIL_FROM
         EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@directus.local}
 
+  # ── dev ───────────────────────────────────────────────────────────────────
+  # Development setup. Referenced in recipes/directus/0 — Development/import.yaml
+  # via `zeropsSetup: dev`. Extends base for all env variables.
+  - setup: dev
+    extends: base
+
+    build:
+      base: nodejs@22
+      buildCommands:
+        - npm ci --omit=dev
+      deployFiles:
+        - node_modules
+        - package.json
+        - package-lock.json
+        - data
+        - database
+        - extensions
+        - scripts
+      cache: node_modules
+
+    deploy:
+      readinessCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
+    run:
+      envVariables:
+        # ── Email (Mailpit SMTP sink) ─────────────────────────────────────────
+        # Dev-only: route all outgoing email to Mailpit for inspection in its UI.
+        # In production this block is absent; Directus defaults to sendmail
+        # (no network health check), so /server/health stays green without SMTP.
+        EMAIL_TRANSPORT: smtp
+        EMAIL_SMTP_HOST: mailpit
+        EMAIL_SMTP_PORT: "1025"
+
+        # ── Demo content seeding ──────────────────────────────────────────────
+        # SEED_VERSION is set here (dev only) so the seed hook runs in development.
+        # Production intentionally omits this — set it in the Zerops GUI or as an
+        # envSecret in import.yaml only if you want demo content on production.
+        SEED_VERSION: "1.0.0"
+
+      initCommands:
+        - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
+        - zsc execOnce "schema-cms-v1" -- node scripts/ensure-schema.mjs
+
+      start: node_modules/.bin/directus start
+
+      healthCheck:
+        httpGet:
+          port: 8055
+          path: /server/health
+
   # ── prod ──────────────────────────────────────────────────────────────────
   # Production setup. Referenced in recipes/directus/1 — Production/import.yaml
   # via `zeropsSetup: prod`. Extends base for all env variables.
@@ -125,10 +178,6 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
-        # Must cover the full initCommands duration.
-        # bootstrap + schema apply on a cold database can take 60–120 s on first deploy.
-        failureTimeout: 180s
-        retryPeriod: 5s
 
     run:
       # zsc execOnce: only the first container per deploy runs each command.
@@ -150,14 +199,6 @@ zerops:
         httpGet:
           port: 8055
           path: /server/health
-        # Time to wait for /server/health to respond before marking unhealthy.
-        failureTimeout: 60s
-        # Remove a container from the load-balancer when it stops passing health checks.
-        disconnectTimeout: 30s
-        # Re-add the container once health checks resume passing.
-        recoveryTimeout: 30s
-        # How often to call /server/health while the container is running.
-        execPeriod: 15s
 
   # ── directus ──────────────────────────────────────────────────────────────
   # Hostname-matched alias for the production setup. Zerops resolves the setup
@@ -166,63 +207,3 @@ zerops:
   # Extends prod so both are always in sync — only the name differs.
   - setup: directus
     extends: prod
-
-  # ── dev ───────────────────────────────────────────────────────────────────
-  # Development setup. Referenced in recipes/directus/0 — Development/import.yaml
-  # via `zeropsSetup: dev`. Extends base for all env variables.
-  - setup: dev
-    extends: base
-
-    build:
-      base: nodejs@22
-      buildCommands:
-        - npm ci --omit=dev
-      deployFiles:
-        - node_modules
-        - package.json
-        - package-lock.json
-        - data
-        - database
-        - extensions
-        - scripts
-      cache: node_modules
-
-    deploy:
-      readinessCheck:
-        httpGet:
-          port: 8055
-          path: /server/health
-        # bootstrap + schema apply on a cold database can take 60–120 s on first deploy.
-        failureTimeout: 180s
-        retryPeriod: 5s
-
-    run:
-      envVariables:
-        # ── Email (Mailpit SMTP sink) ─────────────────────────────────────────
-        # Dev-only: route all outgoing email to Mailpit for inspection in its UI.
-        # In production this block is absent; Directus defaults to sendmail
-        # (no network health check), so /server/health stays green without SMTP.
-        EMAIL_TRANSPORT: smtp
-        EMAIL_SMTP_HOST: mailpit
-        EMAIL_SMTP_PORT: "1025"
-
-        # ── Demo content seeding ──────────────────────────────────────────────
-        # SEED_VERSION is set here (dev only) so the seed hook runs in development.
-        # Production intentionally omits this — set it in the Zerops GUI or as an
-        # envSecret in import.yaml only if you want demo content on production.
-        SEED_VERSION: "1.0.0"
-
-      initCommands:
-        - zsc execOnce "bootstrap-$ZEROPS_appVersionId" -- node_modules/.bin/directus bootstrap
-        - zsc execOnce "schema-cms-v1" -- node scripts/ensure-schema.mjs
-
-      start: node_modules/.bin/directus start
-
-      healthCheck:
-        httpGet:
-          port: 8055
-          path: /server/health
-        failureTimeout: 60s
-        disconnectTimeout: 30s
-        recoveryTimeout: 30s
-        execPeriod: 15s
