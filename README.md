@@ -65,6 +65,8 @@ Browser / API clients
 ├── recipes/directus/
 │   ├── 0 — Development/import.yaml     ← Development environment (NON_HA services, Mailpit)
 │   └── 1 — Production/import.yaml      ← Production environment (HA services, 2–6 containers)
+├── scripts/
+│   └── ensure-schema.mjs               ← idempotent schema apply; skips if DB already seeded
 ├── docker-compose.yml                  ← local stack with full Zerops parity
 ├── package.json
 └── zerops.yaml                         ← build + run pipeline (`base`, `development`, `production`, `directus` setups)
