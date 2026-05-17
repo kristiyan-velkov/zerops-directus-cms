@@ -55,9 +55,9 @@ const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
  * DDL is executed outside any transaction — PostgreSQL auto-commits CREATE.
  */
 async function ensureSeedRunsTable(db) {
-  const exists = await db.schema.hasTable('seed_runs');
+  const exists = await db.schema.hasTable('directus_seed_runs');
   if (exists) return;
-  await db.schema.createTable('seed_runs', (t) => {
+  await db.schema.createTable('directus_seed_runs', (t) => {
     t.string('seed_version').primary().notNullable();
     t.timestamp('ran_at', { useTz: true }).notNullable().defaultTo(db.fn.now());
   });
@@ -172,7 +172,7 @@ export default ({ action }, { database, logger, services, getSchema }) => {
     // where the seed has already completed. The real race safety is the
     // atomic INSERT inside the transaction below (step 5).
     await ensureSeedRunsTable(database);
-    const alreadyRan = await database('seed_runs').where({ seed_version: seedVersion }).first();
+    const alreadyRan = await database('directus_seed_runs').where({ seed_version: seedVersion }).first();
     if (alreadyRan) {
       log.info({ seedVersion }, 'Seed version already ran — skipping.');
       return;
@@ -288,7 +288,7 @@ export default ({ action }, { database, logger, services, getSchema }) => {
         // Atomic distributed lock — whoever inserts first wins the seed.
         // ON CONFLICT DO NOTHING returns 0 rows when another container
         // already inserted this version; `claimed` will be undefined.
-        const [claimed] = await trx('seed_runs')
+        const [claimed] = await trx('directus_seed_runs')
           .insert({ seed_version: seedVersion, ran_at: trx.fn.now() })
           .onConflict('seed_version')
           .ignore()
