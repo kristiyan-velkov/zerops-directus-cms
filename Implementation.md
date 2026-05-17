@@ -17,7 +17,7 @@ This guide walks through every decision and implementation detail behind this Ze
 9. [Auto-healing seed hook](#9-auto-healing-seed-hook)
 10. [Object storage (S3)](#10-object-storage-s3)
 11. [Valkey cache and multi-container sync](#11-valkey-cache-and-multi-container-sync)
-12. [Email — Mailpit (dev) and SMTP (prod)](#12-email--mailpit-dev-and-smtp-prod)
+12. [Email — Mailpit (development) and SMTP (production)](#12-email--mailpit-development-and-smtp-production)
 13. [Environment variables and secrets](#13-environment-variables-and-secrets)
 14. [Local development with Docker Compose](#14-local-development-with-docker-compose)
 15. [First login and post-deploy checklist](#15-first-login-and-post-deploy-checklist)
@@ -35,10 +35,10 @@ After a single Zerops import, you have:
 | What | Details |
 |---|---|
 | Directus 11 running on Alpine Node.js 22 (LTS) | Production HTTP server on port 8055 |
-| PostgreSQL 16 | Primary datastore (NON_HA in dev, 3-node HA cluster in prod) |
+| PostgreSQL 16 | Primary datastore (NON_HA in development, 3-node HA cluster in production) |
 | Valkey 7.2 (Redis-compatible) | Cache + pub/sub sync for multi-container deployments |
 | S3-compatible object storage | File uploads, image transformations |
-| Mailpit (dev only) | SMTP capture — no real email ever leaves the dev environment |
+| Mailpit (development only) | SMTP capture — no real email ever leaves the development environment |
 | Demo schema | `categories`, `authors`, `posts` collections with full relations |
 | Seeded demo content | 3 categories · 2 authors · 4 posts (3 published, 1 draft) · 8 files with metadata |
 | Admin user | `admin@example.com` with avatar, title, location, description, and tags |
@@ -166,18 +166,21 @@ The layout mirrors the official [`zerops-recipe-apps/strapi-app`](https://github
 build:
   base: alpine/nodejs@22
   buildCommands:
-    - npm ci --omit=dev        # install production deps only
+    - npm ci --omit=dev        # install production deps only; reproducible from package-lock.json
   deployFiles:
     - node_modules
     - package.json
     - package-lock.json
-    - data                     # seed input for the hook
+    - data                     # seed input (data.json, images/, uploads/)
     - database                 # snapshot.yaml for schema apply
-    - extensions               # the seed hook itself
-  cache: node_modules          # reused across builds if package-lock.json unchanged
+    - extensions               # directus-extension-seed-demo auto-healing hook
+    - scripts                  # ensure-schema.mjs conditional schema apply guard
+  cache: ~/.npm                # caches downloaded tarballs; reused if package-lock.json unchanged
 ```
 
-`npm ci --omit=dev` installs only the two production dependencies (`directus` and `@directus/sdk`). `devDependencies` are excluded to keep the artifact small and the build fast.
+`npm ci --omit=dev` installs only the production dependencies (`directus` and `@directus/sdk`). `devDependencies` are excluded to keep the artifact small and the build deterministic.
+
+**Why `~/.npm` and not `node_modules`?** `node_modules` itself cannot safely be cached as a Zerops build artifact because it contains platform-specific binaries that must be rebuilt for the container OS. `~/.npm` caches the downloaded tarballs only — `npm ci` still runs the install step but reads packages from the local cache (~5–10 s) rather than the registry (~60–90 s).
 
 ### Readiness check
 
@@ -187,13 +190,14 @@ deploy:
     httpGet:
       port: 8055
       path: /server/health
-    failureTimeout: 180
-    retryPeriod: 5
+    # failureTimeout and retryPeriod are intentionally omitted.
+    # The Zerops runtime rejects integer values (!!int → time.Duration unmarshal error)
+    # and strips unit suffixes from quoted strings before unmarshaling, producing the
+    # same error. Zerops applies its own defaults. The official Strapi recipe uses the
+    # same bare httpGet pattern without timeout overrides.
 ```
 
-Zerops polls `GET /server/health` every 5 seconds. The 180-second window covers the full boot sequence on a cold database: `bootstrap` + `ensure-schema.mjs` (schema apply on first deploy) + `directus start`. Warm restarts are typically healthy within 8–10 seconds.
-
-> **Note:** `failureTimeout` and `retryPeriod` are **plain integers (seconds)**, as documented by Zerops. Do not add a unit suffix (`180s`) — the Zerops documentation confirms integer-only values.
+Zerops polls `GET /server/health` until it returns a 2xx response. On a cold database (first deploy), the full boot sequence — `bootstrap` → `ensure-schema.mjs` (schema apply) → `directus start` — takes approximately 30–60 seconds. Warm restarts are typically healthy within 8–10 seconds. Zerops' default `failureTimeout` is sufficient for both cases.
 
 ### initCommands — run exactly once per deploy
 
@@ -227,15 +231,12 @@ healthCheck:
   httpGet:
     port: 8055
     path: /server/health
-  failureTimeout: 60
-  disconnectTimeout: 30
-  recoveryTimeout: 30
-  execPeriod: 15
+  # All timing fields (failureTimeout, disconnectTimeout, recoveryTimeout, execPeriod)
+  # are intentionally omitted — same runtime parsing issue as the readinessCheck.
+  # Zerops defaults are applied automatically.
 ```
 
-Zerops probes the running container every 15 seconds. If `/server/health` stops responding within 60 seconds, the container is removed from the load-balancer (`disconnectTimeout: 30`) and replaced. Once health checks resume passing, it is re-added after `recoveryTimeout: 30`.
-
-> **Note:** All `healthCheck` timing fields are **plain integers (seconds)**, as documented by Zerops. Do not add a unit suffix (`60s`) — the Zerops documentation confirms integer-only values.
+Zerops probes `/server/health` on the running container at the default interval. If the endpoint stops responding, the container is disconnected from the load-balancer and replaced with a fresh one. Zerops' defaults handle the probe cadence and disconnect/recovery windows without requiring explicit overrides.
 
 ---
 
@@ -329,6 +330,15 @@ node scripts/ensure-schema.mjs
 ```
 
 `ensure-schema.mjs` checks whether the `categories` table already exists before calling `directus schema apply --yes ./database/snapshot.yaml`. If the table is present, schema apply is skipped entirely — protecting existing data. Schema apply only runs on a genuinely fresh (just-bootstrapped) database.
+
+**CLI auto-detection:** The Directus CLI path differs between environments:
+
+| Environment | CLI location | Why |
+|---|---|---|
+| Zerops (`npm ci`) | `node_modules/.bin/directus` | Flat `node_modules` from `npm ci` |
+| Docker official image (`directus/directus`) | `node cli.js` | Image uses `pnpm` virtual store; no `node_modules/.bin/directus` |
+
+The script detects which path exists at runtime using `existsSync` and uses the correct one automatically. This means `ensure-schema.mjs` works identically in `docker compose` local development and on Zerops, with no environment-specific configuration.
 
 > **Why not call `directus schema apply` directly in initCommands?** `schema apply` against a database that already has custom collections drops and recreates those tables, wiping all rows. Running it on every deploy would delete all content on every restart. `ensure-schema.mjs` adds a database-level guard that makes the command safe to call unconditionally.
 
@@ -483,11 +493,22 @@ In a multi-container deployment, all Directus instances share the same Valkey in
 - **Rate-limit counters** — counters are consistent across all instances.
 - **Auth token blacklists** — a logout on one container is immediately visible to all others.
 
-`SYNCHRONIZATION_STORE=redis` is harmless in a single-container dev environment and **essential** in the production multi-container setup.
+`SYNCHRONIZATION_STORE=redis` is harmless in a single-container development environment and **essential** in the production multi-container setup.
+
+### 3. Rate limiting
+
+```dotenv
+RATE_LIMITER_ENABLED=true
+RATE_LIMITER_STORE=redis
+RATE_LIMITER_POINTS=50
+RATE_LIMITER_DURATION=1
+```
+
+Rate limiting is enabled in the `base` setup (inherited by both `development` and `production`). `RATE_LIMITER_STORE=redis` stores counters in Valkey, making limits consistent across all containers in an HA deployment. Without this, a client could bypass a per-container limit by round-robining across the load balancer. The default of 50 requests per second per IP covers normal API usage while blocking brute-force login attempts on `/auth/login`.
 
 ---
 
-## 12. Email — Mailpit (dev) and SMTP (prod)
+## 12. Email — Mailpit (development) and SMTP (production)
 
 ### Development — Mailpit
 
@@ -509,8 +530,10 @@ Add these environment variables to the `directus` service in the Zerops GUI afte
 EMAIL_TRANSPORT         smtp
 EMAIL_SMTP_HOST         smtp.sendgrid.net       # or your provider
 EMAIL_SMTP_PORT         587
-EMAIL_FROM              no-reply@yourdomain.com
+DIRECTUS_EMAIL_FROM     no-reply@yourdomain.com
 ```
+
+`DIRECTUS_EMAIL_FROM` overrides the `EMAIL_FROM` fallback declared in `zerops.yaml` (`${DIRECTUS_EMAIL_FROM:-no-reply@example.com}`). Setting it in the GUI causes Zerops to resolve it to your value; leaving it unset leaves the `no-reply@example.com` placeholder in place.
 
 Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as **secret** environment variables.
 
@@ -556,6 +579,19 @@ Zerops automatically resolves `${service_property}` references at runtime:
 | `${storage_secretAccessKey}` | Object storage secret key |
 | `${storage_bucketName}` | Object storage bucket name |
 | `${storage_apiUrl}` | Object storage endpoint URL |
+| `${zeropsSubdomain}` | This service's own public Zerops subdomain URL (built-in variable) |
+
+`${zeropsSubdomain}` is a Zerops built-in — it resolves to the service's public subdomain at runtime (e.g. `https://directus-abc123.prg1.zerops.app`). It is used for `PUBLIC_URL`, which means no manual post-deploy configuration is needed. When a custom domain is connected, update `PUBLIC_URL` to the custom domain and trigger a re-deploy.
+
+### `EMAIL_FROM` override pattern
+
+`EMAIL_FROM` in `zerops.yaml` uses a bash-style fallback:
+
+```yaml
+EMAIL_FROM: ${DIRECTUS_EMAIL_FROM:-no-reply@example.com}
+```
+
+Zerops supports the `${VAR:-default}` fallback syntax. If `DIRECTUS_EMAIL_FROM` is set in the Zerops GUI (or as a secret), its value is used. If not, Directus sends from `no-reply@example.com` (IANA-reserved, avoids SMTP rejection). To configure a real sender: add `DIRECTUS_EMAIL_FROM=no-reply@yourdomain.com` in the Zerops GUI environment variables for the `directus` service.
 
 ---
 
@@ -586,9 +622,11 @@ docker compose up -d
 |---|---|
 | `postgresql@16` | `postgres:16-alpine` |
 | `valkey@7.2` | `valkey/valkey:7.2.13-alpine` |
-| `object-storage` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` |
+| `object-storage` | `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` |
 | `mailpit-app` | `axllent/mailpit:v1.29.7` |
 | `alpine/nodejs@22` + `directus@11` | `directus/directus:11.17.4` |
+
+> **MinIO registry:** Docker Hub (`minio/minio`) is abandoned and contains unpatched CVEs. The compose file uses `quay.io/minio/minio` (server) and `quay.io/minio/mc` (bucket initialiser). The two images follow independent release schedules on quay.io — they do not need matching version tags.
 
 ### Container startup sequence
 
@@ -644,9 +682,9 @@ Navigate to **Content** → **Posts**. You should see 4 demo posts (3 published,
 -->
 ![Directus — seeded posts list](docs/images/10-directus-posts-list.png)
 
-**4. Set `PUBLIC_URL`**
+**4. `PUBLIC_URL` is pre-configured — no action needed**
 
-Copy your subdomain URL (e.g. `https://directus-abc123.zerops.app`) and add it as the `PUBLIC_URL` environment variable on the `directus` service in the Zerops GUI. Trigger a re-deploy to apply. This is required for password-reset email links and OAuth redirect URIs.
+`PUBLIC_URL` is set to `${zeropsSubdomain}` in `zerops.yaml`, which Zerops resolves to the service's public subdomain URL at deploy time. Password-reset email links and OAuth redirect URIs work correctly out of the box. If you connect a **custom domain** later, update `PUBLIC_URL` to the custom domain URL in the Zerops GUI and trigger a re-deploy.
 
 **5. Change the admin email**
 
@@ -654,7 +692,7 @@ In the Data Studio → **User Directory** → **Administrator** — update the e
 
 **6. (Production only) Configure SMTP**
 
-Add `EMAIL_TRANSPORT`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, and `EMAIL_FROM` to the service environment variables. Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as secrets.
+Add `EMAIL_TRANSPORT`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, and `DIRECTUS_EMAIL_FROM` to the service environment variables. Add `EMAIL_SMTP_USER` and `EMAIL_SMTP_PASSWORD` as secrets. See [Section 12](#12-email--mailpit-development-and-smtp-production) for full details.
 
 **7. (Production only) Set up database backups**
 
@@ -727,7 +765,7 @@ Directus is CPU-bound during image transformations and RAM-bound during large co
 
 | Decision | Alternative considered | Why this approach |
 |---|---|---|
-| **Four setups in `zerops.yaml`: `base`, `dev`, `prod`, `directus`** | Single setup for all environments | `base` keeps all shared env vars DRY. `dev` and `prod` extend it and add only what differs (email transport, SEED_VERSION, HA initCommands). `directus` is a hostname-matched alias for `prod` so imports without `zeropsSetup` still resolve. |
+| **Four setups in `zerops.yaml`: `base`, `development`, `production`, `directus`** | Single setup for all environments | `base` keeps all shared env vars DRY. `development` and `production` extend it and add only what differs (email transport, SEED_VERSION, HA initCommands). `directus` is a hostname-matched alias for `production` so imports without `zeropsSetup` still resolve. |
 | **`ensure-schema.mjs` instead of raw `directus schema apply`** | Calling `directus schema apply` directly in initCommands | `schema apply` is destructive if run against a database that already has custom collections — it would drop and recreate tables, wiping all rows. `ensure-schema.mjs` checks `hasTable('categories')` first and only applies on a genuinely fresh database. |
 | **Fixed execOnce key for schema (`"schema-cms-v1"`)** | Version-scoped key like `"schema-$ZEROPS_appVersionId"` | A version-scoped key would re-run `ensure-schema.mjs` on every deploy. Combined with the `hasTable` guard, that is safe but wasteful. A fixed key runs the script at most once per project lifetime — correct for a one-time initial schema setup. |
 | **`zsc execOnce` for initCommands** | Plain commands (run on every container) | In a multi-container HA deploy, plain commands would run concurrently on all containers, causing migration race conditions. `execOnce` acquires a distributed lock. |
@@ -736,7 +774,7 @@ Directus is CPU-bound during image transformations and RAM-bound during large co
 | **Knex-direct INSERT (not HTTP API)** | `POST /items/<collection>` via the REST API | HTTP seeding requires `/server/health` polling + `/auth/login` round-trips, adding 15–25 s to boot time. Knex direct is ~50 ms for the whole seed. |
 | **`FORCE_PATH_STYLE=true` for S3** | Default virtual-hosted style | Zerops object storage uses a single endpoint hostname. AWS-style `bucket.host` addressing is not supported on custom S3 endpoints. |
 | **Mailpit in Development, no Mailpit in Production** | Mailpit in both environments | Mailpit is a dev tool. Production should use a real SMTP provider with deliverability tracking. The `import.yaml` files for each environment reflect this cleanly. |
-| **`SEED_VERSION` only in `dev` setup, absent from `base`** | `SEED_VERSION` in `base` (inherited by all setups) | Production should never seed demo content by default. Keeping `SEED_VERSION` out of `base` means production is safe without any operator action. Operators opt in explicitly by adding `SEED_VERSION` as an env secret in the Zerops GUI. |
+| **`SEED_VERSION` only in `development` setup, absent from `base`** | `SEED_VERSION` in `base` (inherited by all setups) | Production should never seed demo content by default. Keeping `SEED_VERSION` out of `base` means production is safe without any operator action. Operators opt in explicitly by adding `SEED_VERSION` as an env secret in the Zerops GUI. |
 
 ---
 

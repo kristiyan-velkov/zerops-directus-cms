@@ -3,8 +3,7 @@
 &nbsp;
 
 <!-- #ZEROPS_EXTRACT_START:intro# -->
-Basic example of running [Directus](https://directus.io) on [Zerops](https://zerops.io).
-Cloud-ready open-source headless CMS and data platform using PostgreSQL, Valkey (Redis-compatible) cache, and S3-compatible object storage.
+Production-ready [Directus](https://directus.io) on [Zerops](https://zerops.io). Open-source headless CMS running on Node.js 22 with PostgreSQL 16, Valkey 7.2 (Redis-compatible) cache, S3-compatible object storage, and Mailpit for email capture. Ships with a pre-built schema and seeded demo content — fully usable immediately after deploy.
 <!-- #ZEROPS_EXTRACT_END:intro# -->
 
 &nbsp;
