@@ -159,8 +159,6 @@ zerops:
         # Go time.Duration strings — the Zerops runtime rejects plain integers
         # with "cannot unmarshal !!int into time.Duration" despite docs showing integers.
         failureTimeout: 60s
-        disconnectTimeout: 30s
-        recoveryTimeout: 30s
         execPeriod: 15s
 
   # ── prod ──────────────────────────────────────────────────────────────────
@@ -199,8 +197,8 @@ zerops:
         # Go time.Duration strings — the Zerops runtime rejects plain integers
         # with "cannot unmarshal !!int into time.Duration" despite docs showing integers.
         # 180s covers the worst case: cold-start DB + bootstrap + schema apply.
-        failureTimeout: 180s
-        retryPeriod: 5s
+        failureTimeout: "180s"
+        retryPeriod: "5s"
 
     run:
       # zsc execOnce: only the first container per deploy runs each command.
@@ -224,10 +222,8 @@ zerops:
           path: /server/health
         # Go time.Duration strings — the Zerops runtime rejects plain integers
         # with "cannot unmarshal !!int into time.Duration" despite docs showing integers.
-        failureTimeout: 60s
-        disconnectTimeout: 30s
-        recoveryTimeout: 30s
-        execPeriod: 15s
+        failureTimeout: "60s"
+        execPeriod: "15s"
 
   # ── directus ──────────────────────────────────────────────────────────────
   # Hostname-matched alias for the production setup. Zerops resolves the setup
