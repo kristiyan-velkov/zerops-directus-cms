@@ -83,7 +83,7 @@ zerops:
         # The hook records each version in the `seed_runs` table so it never
         # runs the same version twice. Set to a non-empty string to enable seeding;
         # leave empty (or unset) to skip all seeding (useful for bare production branches).
-        SEED_VERSION: "1.0.0"
+        SEED_VERSION: "1.0.7"
 
         # ── Email ────────────────────────────────────────────────────────────
         # No email transport is set here intentionally — each environment
