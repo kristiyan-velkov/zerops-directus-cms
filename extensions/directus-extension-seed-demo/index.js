@@ -271,6 +271,17 @@ export default ({ action }, { database, logger, services, getSchema }) => {
     // we THROW — rolling back the entire transaction including the seed_runs
     // claim. The version is NOT recorded, so the next container restart
     // retries from scratch instead of silently completing with empty tables.
+    //
+    // Idempotency is keyed on the SEED ROW IDs (fixed UUIDs in data.json),
+    // not on whether the collection has any data at all. This matters because:
+    //   • A collection can have user-added rows AND still be missing seed rows.
+    //   • Bumping SEED_VERSION after manually deleting seed content correctly
+    //     re-inserts only what is missing without touching user data.
+    //   • The old bulk `exists` check would claim the version immediately and
+    //     skip all inserts when ANY row existed — silently consuming the version
+    //     with 0 actual inserts. If the user then deleted all content, the next
+    //     restart fast-pathed on the already-claimed version, leaving collections
+    //     permanently empty until the version was bumped again.
     try {
       await database.transaction(async (trx) => {
 
@@ -304,14 +315,25 @@ export default ({ action }, { database, logger, services, getSchema }) => {
             );
           }
 
-          const exists = await trx(collection).select(trx.raw('1')).limit(1).first();
-          if (exists) {
-            log.debug({ collection }, 'Already populated — skipping seed.');
+          // Check which seed rows (by their fixed UUIDs) are already present.
+          // This is intentionally narrower than "does the collection have any rows":
+          //   • User-added rows with different IDs do not suppress seeding.
+          //   • Accidentally deleted seed rows are detected and re-inserted.
+          //   • All seed rows present → genuinely nothing to do → safe to skip.
+          const seedIds = rows.map((r) => r.id);
+          const existingIds = new Set(
+            await trx(collection).whereIn('id', seedIds).pluck('id'),
+          );
+          const missing = rows.filter((r) => !existingIds.has(r.id));
+
+          if (missing.length === 0) {
+            log.debug({ collection, count: rows.length }, 'All seed rows present — skipping.');
             continue;
           }
 
-          // Resolve file key strings (e.g. "cover-directus") → actual UUIDs.
-          const resolved = rows.map((row) => {
+          // Resolve file key strings (e.g. "cover-directus") → actual UUIDs
+          // for only the rows that need to be inserted.
+          const resolved = missing.map((row) => {
             const out = { ...row };
             for (const [field, value] of Object.entries(out)) {
               if (typeof value === 'string' && value in fileIds) {
@@ -323,7 +345,7 @@ export default ({ action }, { database, logger, services, getSchema }) => {
 
           const prepared = await serialiseJsonColumns(trx, collection, resolved);
           await trx(collection).insert(prepared);
-          log.info({ collection, count: rows.length }, 'Seeded demo content.');
+          log.info({ collection, inserted: missing.length, total: rows.length }, 'Seeded demo content.');
         }
 
         // ── 5b. Seed Insights dashboard ─────────────────────────────────
